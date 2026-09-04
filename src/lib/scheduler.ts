@@ -2116,7 +2116,12 @@ function scheduleZuschlag(
   dates: string[],
   dayOf: (iso: string) => ResolvedDay,
 ): void {
-  const sonntage = dates.filter((d) => weekdayKeyOf(parseIsoDate(d)) === "sunday");
+  // Nur Sonntage, an denen der Laden ZU ist. An einem verkaufsoffenen Sonntag
+  // (Ausnahme mit eigenen Zeiten) steht dort schon ein Ladendienst – ein
+  // zweiter Reinigungsdienst ab 10:00 würde dieselbe Person doppelt verplanen.
+  const sonntage = dates.filter(
+    (d) => weekdayKeyOf(parseIsoDate(d)) === "sunday" && dayOf(d).closed,
+  );
   for (const emp of employees) {
     extendNightShifts(state, emp, dayOf);
     scheduleSundayCleaning(emp, sonntage, state.shifts);

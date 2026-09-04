@@ -4,7 +4,7 @@
 // ============================================================================
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { Employee, EmploymentType, Schedule, Shift } from "../types";
+import type { Employee, Schedule, Shift } from "../types";
 import { generateSchedule } from "../lib/scheduler";
 import { analyzeSchedule } from "../lib/analyze";
 import { validateSchedule, type ValidationResult } from "../lib/validation";
@@ -316,21 +316,28 @@ export function useSchedule() {
   }, [pushNow]);
 
   // ----- Mitarbeiter -----
-  const addEmployee = useCallback(
-    (name: string, employmentType: EmploymentType, targetHours: number) => {
-      const emp: Employee = {
-        id: newEmployeeId(),
-        name: name.trim() || "Neuer Mitarbeiter",
-        employmentType,
-        targetMinutes: Math.round(targetHours) * 60,
-      };
-      setSchedule((s) => {
-        if (s.lockedAt) return s; // Monat gedruckt und gesperrt
-        return { ...s, employees: [...s.employees, emp] };
-      });
-    },
-    [],
-  );
+  /**
+   * Neue Kraft anlegen. Nimmt den ganzen Datensatz (nicht nur Name/Art/Stunden),
+   * damit die Oberfläche Wochentage und Reinigungs-Töpfe im selben Schritt
+   * speichern kann – vorher musste sie die Kraft erst anlegen und danach in der
+   * Liste wiederfinden, um den Rest nachzutragen.
+   *
+   * Gibt die neue id zurück (oder null, wenn der Monat gesperrt ist), damit der
+   * Aufrufer weiß, ob gespeichert wurde.
+   */
+  const addEmployee = useCallback((data: Omit<Employee, "id">): string | null => {
+    if (latest.current.schedule.lockedAt) return null; // Monat gedruckt und gesperrt
+    const emp: Employee = {
+      ...data,
+      id: newEmployeeId(),
+      name: data.name.trim() || "Nhân viên mới",
+    };
+    setSchedule((s) => {
+      if (s.lockedAt) return s;
+      return { ...s, employees: [...s.employees, emp] };
+    });
+    return emp.id;
+  }, []);
 
   const updateEmployee = useCallback((id: string, patch: Partial<Employee>) => {
     setSchedule((s) => {

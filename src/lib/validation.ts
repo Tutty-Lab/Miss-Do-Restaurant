@@ -121,6 +121,30 @@ export function validateSchedule(
       seenDates.add(shift.date);
     }
 
+    // Zwei Dienste am selben Tag dürfen sich zeitlich nicht überschneiden.
+    // "Höchstens ein Ladendienst pro Tag" allein reicht nicht: die
+    // Sonntagsreinigung ist ein eigener Dienst und läge an einem
+    // verkaufsoffenen Sonntag sonst unbemerkt über dem Ladendienst.
+    const byDate = new Map<string, Shift[]>();
+    for (const s of empShifts) {
+      const liste = byDate.get(s.date);
+      if (liste) liste.push(s);
+      else byDate.set(s.date, [s]);
+    }
+    for (const [date, liste] of byDate) {
+      if (liste.length < 2) continue;
+      const sortiert = [...liste].sort((a, b) => a.startMinutes - b.startMinutes);
+      for (let i = 1; i < sortiert.length; i++) {
+        if (sortiert[i].startMinutes < sortiert[i - 1].endMinutes) {
+          errors.push({
+            employeeId: emp.id,
+            date,
+            message: `${emp.name}: hai ca trùng giờ ngày ${date}.`,
+          });
+          break; // eine Meldung je Tag genügt
+        }
+      }
+    }
     // Nur Ladenstunden zählen gegen das normale Monats-Soll – der Abend-Anteil
     // (nightMinutes) wird abgezogen.
     const assignedMinutes = floorShifts.reduce(

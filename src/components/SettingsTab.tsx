@@ -10,7 +10,15 @@ import {
   weekdayKeyOf,
   type WeekdayKey,
 } from "../lib/demand";
-import type { DayBlocks, DayWindow, WorkHoursConfig } from "../lib/workHours";
+import type { DateOverride, DayBlocks, DayWindow, WorkHoursConfig } from "../lib/workHours";
+import {
+  OPEN_SUNDAYS_PER_YEAR,
+  isOpenSundayOverride,
+  openSundayOverride,
+  openSundaysOfYear,
+  sundayWindowOf,
+  sundaysOfMonth,
+} from "../lib/openSundays";
 import { publicHolidayNames } from "../lib/holidays";
 import { isoLabel } from "../lib/shiftOps";
 
@@ -140,6 +148,217 @@ function BlockRow({
         </label>
       )}
     </div>
+  );
+}
+
+/**
+ * Verkaufsoffene Sonntage – anhaken statt eintippen.
+ *
+ * Der Laden hat sonntags zu, öffnet aber zwölf Sonntage im Jahr. Über das
+ * allgemeine Ausnahme-Formular unten geht das auch, nur müsste man dort jedes
+ * Datum tippen, die Zeiten wiederholen – und niemand sähe, wie viele der zwölf
+ * schon verbraucht sind. Hier ist ein Sonntag ein Häkchen, und das Kontingent
+ * steht daneben.
+ *
+ * Die Uhrzeiten stehen ebenfalls hier, weil die Sonntags-Zeile oben als
+ * "Đóng cửa" angezeigt wird und ihre Felder dort gar nicht erreichbar sind.
+ */
+function OpenSundaysSection({
+  year,
+  month,
+  workHours,
+  overrides,
+  upsertOverride,
+  removeOverride,
+  updateMeta,
+}: {
+  year: number;
+  month: number;
+  workHours: WorkHoursConfig;
+  overrides: DateOverride[];
+  upsertOverride: (ov: DateOverride) => void;
+  removeOverride: (date: string) => void;
+  updateMeta: (patch: { workHours?: WorkHoursConfig; dateOverrides?: DateOverride[] }) => void;
+}) {
+  const sundays = useMemo(() => sundaysOfMonth(year, month), [year, month]);
+  const openThisYear = useMemo(() => openSundaysOfYear(overrides, year), [overrides, year]);
+  const openSet = useMemo(() => new Set(openThisYear), [openThisYear]);
+
+  // Sind in diesem Monat schon Sonntage angehakt, startet die Liste offen – ein
+  // eingeklapptes Kästchen würde einen bereits gesetzten Haken verstecken.
+  const [expanded, setExpanded] = useState(() => sundays.some((d) => openSet.has(d)));
+
+  const rest = OPEN_SUNDAYS_PER_YEAR - openThisYear.length;
+  const fenster = sundayWindowOf(workHours);
+  const gueltig = fenster.endMinutes > fenster.startMinutes;
+  const tickedThisMonth = sundays.filter((d) => openSet.has(d)).length;
+
+  function toggle(iso: string) {
+    if (openSet.has(iso)) {
+      removeOverride(iso);
+      return;
+    }
+    if (rest <= 0) return;
+    upsertOverride(openSundayOverride(iso, workHours));
+  }
+
+  /**
+   * Sonntags-Uhrzeiten ändern – für die Wochentags-Zeile UND für alle schon
+   * angehakten Sonntage in einem Schritt. Sonst behielten die alten Haken ihre
+   * alten Uhrzeiten, und die Anzeige hier zeigte etwas anderes als der Plan
+   * tatsächlich verwendet.
+   */
+  function setHours(patch: Partial<DayWindow>) {
+    const next: DayWindow = { ...fenster, ...patch };
+    const workHoursNext: WorkHoursConfig = {
+      ...workHours,
+      perWeekday: { ...workHours.perWeekday, sunday: [next] },
+    };
+    const dateOverrides =
+      next.endMinutes > next.startMinutes
+        ? overrides.map((ov) => (isOpenSundayOverride(ov) ? { ...ov, window: { ...next } } : ov))
+        : overrides;
+    updateMeta({ workHours: workHoursNext, dateOverrides });
+  }
+
+  return (
+    <section className="rounded-lg bg-white border border-slate-200 p-4 sm:p-5 shadow-sm">
+      <div className="flex items-start justify-between gap-3 mb-1">
+        <h2 className="text-base font-semibold text-slate-900">Chủ nhật mở cửa</h2>
+        <span
+          className={`shrink-0 rounded-full px-2 py-0.5 text-xs font-medium ${
+            rest > 0 ? "bg-slate-100 text-slate-600" : "bg-amber-100 text-amber-800"
+          }`}
+        >
+          {openThisYear.length}/{OPEN_SUNDAYS_PER_YEAR} · năm {year}
+        </span>
+      </div>
+      <p className="text-xs text-slate-500 mb-3">
+        Tiệm nghỉ chủ nhật, mỗi năm được mở {OPEN_SUNDAYS_PER_YEAR} chủ nhật. Bấm nút dưới để hiện
+        các chủ nhật trong tháng rồi tick ngày mở cửa.
+      </p>
+
+      <div className="flex items-center gap-2 flex-wrap mb-3 text-sm text-slate-700">
+        <span className="shrink-0">Giờ làm chủ nhật</span>
+        <input
+          type="time"
+          className={timeClass}
+          value={minutesToTime(fenster.startMinutes)}
+          onChange={(e) => {
+            try {
+              setHours({ startMinutes: timeToMinutes(e.target.value) });
+            } catch {
+              /* nhập chưa xong */
+            }
+          }}
+        />
+        <span className="text-slate-400">–</span>
+        <input
+          type="time"
+          className={timeClass}
+          value={minutesToTime(fenster.endMinutes)}
+          onChange={(e) => {
+            try {
+              setHours({ endMinutes: timeToMinutes(e.target.value) });
+            } catch {
+              /* nhập chưa xong */
+            }
+          }}
+        />
+      </div>
+      {!gueltig && <p className="-mt-2 mb-3 text-xs text-rose-600">Giờ ra phải sau giờ vào.</p>}
+
+      <button
+        type="button"
+        onClick={() => setExpanded((v) => !v)}
+        aria-expanded={expanded}
+        className="w-full flex items-center justify-between gap-2 rounded-lg border border-slate-300 px-3 py-2.5 text-sm font-medium text-slate-700 hover:bg-slate-50"
+      >
+        <span>
+          Chọn chủ nhật trong {MONTH_NAMES_VI[month - 1]} {year}
+        </span>
+        <span className="flex items-center gap-2 text-xs text-slate-500">
+          {tickedThisMonth > 0 && (
+            <span className="rounded-full bg-emerald-100 px-2 py-0.5 font-medium text-emerald-700">
+              {tickedThisMonth} ngày
+            </span>
+          )}
+          <span className={expanded ? "rotate-180 transition-transform" : "transition-transform"}>
+            ▾
+          </span>
+        </span>
+      </button>
+
+      {expanded && (
+        <div className="mt-3">
+          {sundays.length === 0 ? (
+            <p className="text-xs text-slate-500">Tháng này không có chủ nhật nào.</p>
+          ) : (
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+              {sundays.map((iso) => {
+                const on = openSet.has(iso);
+                const blocked = !on && rest <= 0;
+                return (
+                  <button
+                    key={iso}
+                    type="button"
+                    disabled={blocked}
+                    aria-pressed={on}
+                    onClick={() => toggle(iso)}
+                    className={`flex min-h-[44px] items-center gap-2 rounded-lg border px-3 py-2 text-sm transition-colors ${
+                      on
+                        ? "border-emerald-500 bg-emerald-50 font-medium text-emerald-800"
+                        : "border-slate-300 bg-white text-slate-700 hover:bg-slate-50"
+                    } ${blocked ? "cursor-not-allowed opacity-40" : ""}`}
+                  >
+                    <span
+                      className={`grid h-5 w-5 shrink-0 place-items-center rounded border text-[11px] ${
+                        on
+                          ? "border-emerald-600 bg-emerald-600 text-white"
+                          : "border-slate-300 bg-white text-transparent"
+                      }`}
+                    >
+                      ✓
+                    </span>
+                    <span>CN {isoLabel(iso).slice(0, 5)}</span>
+                  </button>
+                );
+              })}
+            </div>
+          )}
+          {rest <= 0 && (
+            <p className="mt-2 text-xs text-amber-700">
+              Đã dùng hết {OPEN_SUNDAYS_PER_YEAR} chủ nhật của năm {year} — bỏ tick một ngày khác
+              trước đã.
+            </p>
+          )}
+        </div>
+      )}
+
+      {openThisYear.length > 0 && (
+        <div className="mt-3 border-t border-slate-200 pt-3">
+          <div className="mb-1.5 text-xs font-medium text-slate-600">Đã mở trong năm {year}</div>
+          <div className="flex flex-wrap gap-1.5">
+            {openThisYear.map((iso) => (
+              <span
+                key={iso}
+                className="inline-flex items-center gap-1 rounded-full border border-emerald-200 bg-emerald-50 py-0.5 pl-2 pr-1 text-xs text-emerald-800"
+              >
+                {isoLabel(iso).slice(0, 5)}
+                <button
+                  type="button"
+                  onClick={() => removeOverride(iso)}
+                  title="Bỏ ngày này"
+                  className="rounded-full px-1 text-emerald-700 hover:bg-emerald-200"
+                >
+                  ✕
+                </button>
+              </span>
+            ))}
+          </div>
+        </div>
+      )}
+    </section>
   );
 }
 
@@ -324,6 +543,16 @@ export function SettingsTab({ store }: { store: UseScheduleReturn }) {
           </div>
         )}
       </section>
+
+      <OpenSundaysSection
+        year={schedule.year}
+        month={schedule.month}
+        workHours={schedule.workHours}
+        overrides={schedule.dateOverrides}
+        upsertOverride={upsertOverride}
+        removeOverride={removeOverride}
+        updateMeta={updateMeta}
+      />
 
       <section className="rounded-lg bg-white border border-slate-200 p-4 sm:p-5 shadow-sm">
         <h2 className="text-base font-semibold text-slate-900 mb-1">Ngày đặc biệt</h2>
