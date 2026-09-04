@@ -59,8 +59,11 @@ export function validateSchedule(
   for (const shift of shifts) {
     const presence = shift.endMinutes - shift.startMinutes;
     const expectedPaid = presence - shift.pauseMinutes;
+    // Der Abend-Anteil (nightMinutes) bringt keine zusätzliche Pause und zählt
+    // nicht zur 9-Stunden-Grenze des Ladendienstes ("ko ngắt ca").
+    const ladenPaid = shift.paidMinutes - (shift.nightMinutes ?? 0);
     const expectedPause = calculatePause(
-      shift.paidMinutes,
+      ladenPaid,
       employeeById.get(shift.employeeId)?.employmentType,
     );
 
@@ -71,7 +74,7 @@ export function validateSchedule(
         message: `Giờ ra không sau giờ vào (${shift.date}).`,
       });
     }
-    if (shift.paidMinutes > MAX_PAID_MINUTES) {
+    if (ladenPaid > MAX_PAID_MINUTES) {
       errors.push({
         employeeId: shift.employeeId,
         date: shift.date,
@@ -99,9 +102,9 @@ export function validateSchedule(
   for (const emp of employees) {
     const empShifts = shiftsByEmployee.get(emp.id) ?? [];
 
-    // Ladendienste, Abend- und Sonntagsreinigung sind getrennte Töpfe.
+    // Ladendienste und Sonntagsreinigung sind getrennte Töpfe. Die
+    // Abendreinigung steckt als nightMinutes IN den Ladendiensten.
     const floorShifts = empShifts.filter((s) => (s.category ?? "FLOOR") === "FLOOR");
-    const nightShifts = empShifts.filter((s) => s.category === "NIGHT");
     const sundayShifts = empShifts.filter((s) => s.category === "SUNDAY");
 
     // Höchstens EIN Ladendienst pro Tag. Reinigung darf zusätzlich am selben
@@ -118,8 +121,12 @@ export function validateSchedule(
       seenDates.add(shift.date);
     }
 
-    // Nur Ladenstunden zählen gegen das normale Monats-Soll.
-    const assignedMinutes = floorShifts.reduce((sum, s) => sum + s.paidMinutes, 0);
+    // Nur Ladenstunden zählen gegen das normale Monats-Soll – der Abend-Anteil
+    // (nightMinutes) wird abgezogen.
+    const assignedMinutes = floorShifts.reduce(
+      (sum, s) => sum + s.paidMinutes - (s.nightMinutes ?? 0),
+      0,
+    );
     // Die Sechs-Tage-Regel gilt für die Ladendienste; Reinigung bleibt außen vor.
     const maxRun = maxConsecutiveRun(floorShifts.map((s) => s.date));
 
@@ -138,7 +145,7 @@ export function validateSchedule(
 
     // Reinigungs-Töpfe: nur eine WARNUNG, wenn das Soll nicht genau getroffen
     // wird – die Verteilung ist eine Näherung (Tagesobergrenzen, wenige Sonntage).
-    const nightMin = nightShifts.reduce((sum, s) => sum + s.paidMinutes, 0);
+    const nightMin = empShifts.reduce((sum, s) => sum + (s.nightMinutes ?? 0), 0);
     const zielNight = emp.nightMinutes ?? 0;
     if (nightMin !== zielNight) {
       errors.push({

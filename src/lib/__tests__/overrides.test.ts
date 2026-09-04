@@ -8,7 +8,7 @@ import type { Shift } from "../../types";
 const isFloor = (s: Shift) => (s.category ?? "FLOOR") === "FLOOR";
 const soll = SAMPLE_EMPLOYEES.reduce((sum, e) => sum + e.targetMinutes, 0);
 const floorSum = (shifts: Shift[]) =>
-  shifts.filter(isFloor).reduce((a, s) => a + s.paidMinutes, 0);
+  shifts.filter(isFloor).reduce((a, s) => a + s.paidMinutes - (s.nightMinutes ?? 0), 0);
 
 describe("Ausnahmen je Datum (Overrides)", () => {
   it("plant an geschlossenen Tagen keine Schicht – Soll bleibt exakt", () => {

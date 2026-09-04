@@ -17,14 +17,17 @@ Johannisthaler Chaussee 317, 12351 Berlin. Abgeleitet aus der Glory-Duck-App
   "fast doppelt", also steht der Samstag in `DAY_WEIGHTS` auf **1,8**.
 - **Stoßzeiten**: mittags **11:00–14:00** und nachmittags **16:00–19:00**, an
   jedem Öffnungstag.
-- **Reinigung als eigene Töpfe (Zuschlag)**, je Person in *Nhân viên*:
-  - **Nachtzuschlag** – Reinigung nach Ladenschluss, **20:00–23:00**, höchstens
-    3 h/Tag, Mo–Sa.
-  - **Sonntagszuschlag** – Reinigung sonntags, 10:00–20:00, höchstens 8 h je
-    Sonntag.
-  Beides zählt NICHT gegen das normale Monats-Soll (`targetMinutes`), sondern
-  gegen `nightMinutes` / `sundayMinutes`. Wird ein Reinigungs-Soll nicht ganz
-  getroffen, ist das eine **Warnung**, kein Fehler.
+- **Reinigung als eigene Töpfe (Zuschlag)**, je Person in *Nhân viên*, Eingabe
+  jeweils **Stunden pro Monat**:
+  - **Nachtzuschlag** (`nightMinutes`) – die Person arbeitet bis 20:00 und dann
+    **durchgehend weiter** (höchstens bis 23:00). Kein zweiter Dienst, keine
+    Lücke ("ko ngắt ca"): der schließende Ladendienst wird länger. Die Minuten
+    nach 20:00 sind der Nachtzuschlag und stehen als `shift.nightMinutes` am
+    Dienst. Höchstens 3 h/Tag. Reicht die Zahl der Schließtage nicht, um alles
+    unterzubringen, ist der Rest eine **Warnung**.
+  - **Sonntagszuschlag** (`sundayMinutes`) – Reinigung sonntags, ein eigener
+    Dienst (sonntags ist der Laden zu), 10:00–20:00, höchstens 8 h je Sonntag.
+  Beides zählt NICHT gegen das normale Monats-Soll (`targetMinutes`).
 - **Feste Arbeitstage je Person** (`availableWeekdays`) und **Höchstzahl an
   Arbeitstagen je Woche** (`maxDaysPerWeek`), beides in *Nhân viên*. Leer =
   keine Einschränkung.
@@ -109,9 +112,12 @@ werden direkt aus den Konstanten gerendert und können daher nicht veralten.
   Die Pause zählt **nicht** zum Soll, verlängert aber die Anwesenheit:
   `presence = paid + pause`. Eine 8-h-Schicht belegt damit 9 h und passt ins
   Fenster 9:30–20:00 (10,5 h).
-- **Reinigung** (`scheduleZuschlag`): Nacht 20:00–23:00 (≤ 3 h/Tag, Mo–Sa) und
-  Sonntag 10:00–20:00 (≤ 8 h). Eigene Töpfe (`nightMinutes`/`sundayMinutes`),
-  getrennt vom Ladensoll; nicht ganz erreicht = Warnung.
+- **Reinigung** (`scheduleZuschlag`): die Abendreinigung **verlängert einen
+  schließenden Ladendienst** über 20:00 hinaus (bis 23:00, ≤ 3 h) – ein
+  durchgehender Dienst, der Teil nach 20:00 ist `shift.nightMinutes`. Reichen
+  die Schließtage nicht, wird per `uncoveredMinutes`-Prüfung nur so umgedreht,
+  dass keine Öffnungslücke entsteht; der Rest ist eine Warnung. Die
+  Sonntagsreinigung ist ein eigener SUNDAY-Dienst (10:00–20:00, ≤ 8 h).
 - Schichtlängen: **3 bis 9 Stunden**.
   Etwa jede zehnte Schicht wird bewusst auf 4–5 h gekürzt
   (`SHORT_SHIFT_CHANCE`), damit die Pläne nicht mechanisch aussehen – aber nur,

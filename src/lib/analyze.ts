@@ -184,16 +184,19 @@ export function analyzeSchedule(input: AnalyzeInput): ScheduleAnalysis {
     lengthHistogram.set(hours, (lengthHistogram.get(hours) ?? 0) + 1);
   }
 
+  // Nur LADENstunden: der Abend-Anteil (nightMinutes) steckt zwar in
+  // paidMinutes, ist aber Nachtzuschlag und zählt nicht zum Laden-Soll.
+  const ladenMin = (s: Shift) => s.paidMinutes - (s.nightMinutes ?? 0);
   const hoursByEmployee = new Map<string, number>();
   for (const e of input.employees) hoursByEmployee.set(e.id, 0);
   for (const s of input.shifts) {
-    hoursByEmployee.set(s.employeeId, (hoursByEmployee.get(s.employeeId) ?? 0) + s.paidMinutes / 60);
+    hoursByEmployee.set(s.employeeId, (hoursByEmployee.get(s.employeeId) ?? 0) + ladenMin(s) / 60);
   }
 
   return {
     days,
     openDays: days.filter((d) => !d.closed).length,
-    totalPaidHours: input.shifts.reduce((sum, s) => sum + s.paidMinutes, 0) / 60,
+    totalPaidHours: input.shifts.reduce((sum, s) => sum + ladenMin(s), 0) / 60,
     peakViolations: days.filter((d) => d.peaks.some((p) => !p.ok)),
     weekdayFit,
     meanAbsDeviationHours,

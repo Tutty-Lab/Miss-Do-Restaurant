@@ -1965,16 +1965,18 @@ function buildUnmetMessage(
 // App verteilt diese Stunden auf die passenden Tage.
 //
 // ANNAHMEN, die der Betrieb bestätigen sollte:
-//   - Abendreinigung 20:00–23:00 (aus "tới 11g đêm"), höchstens 3 h am Tag,
-//     an den Öffnungstagen Mo–Sa (nach Ladenschluss).
+//   - Abendreinigung: die Person arbeitet bis 20:00 (Ladenschluss) und dann
+//     DURCHGEHEND weiter, höchstens bis 23:00 (aus "tới 11g đêm"). Kein zweiter
+//     Dienst, keine Lücke – der schließende Ladendienst wird einfach länger
+//     ("ko ngắt ca"). Der Teil nach 20:00 ist der Nachtzuschlag.
 //   - Sonntagsreinigung 10:00–20:00, höchstens 8 h je Sonntag; an JEDEM Sonntag
 //     des Monats möglich, unabhängig davon, ob der Laden an dem Sonntag öffnet.
-//   - Die Reinigung läuft neben dem Ladendienst; wer tagsüber im Laden steht,
-//     darf am selben Abend zusätzlich putzen (kein Zeitkonflikt, der Laden ist
-//     dann zu). Die Sechs-Tage-Regel wird für die Reinigung NICHT mitgezählt –
+//     Sonntags ist der Laden zu, es gibt keinen Ladendienst zum Verlängern –
+//     deshalb ist die Sonntagsreinigung ein eigener Dienst (Kategorie SUNDAY).
+//   - Die Sechs-Tage-Regel wird für die Reinigung NICHT gesondert geprüft –
 //     eine bewusste Vereinfachung dieser ersten Fassung.
-const NIGHT_START = 20 * 60;
-const NIGHT_END = 23 * 60;
+const NIGHT_ANCHOR = 20 * 60; // normaler Ladenschluss, an den die Abendreinigung anschließt
+const NIGHT_MAX_PAID = 3 * 60; // 20:00–23:00
 const SUNDAY_CLEAN_START = 10 * 60;
 const SUNDAY_MAX_PAID = 8 * 60;
 
@@ -1990,75 +1992,136 @@ function evenlySpaced<T>(items: T[], n: number): T[] {
 }
 
 /**
- * Verteilt ein Reinigungs-Soll (Minuten) moeglichst gleichmaessig auf die
- * gegebenen Tage, je Tag hoechstens maxPaid bezahlte Minuten. Legt die Dienste
- * direkt an (eigene Kategorie), ohne die Ladenbuchhaltung zu beruehren.
+ * Verlängert schließende Ladendienste eines Mitarbeiters über 20:00 hinaus, bis
+ * sein Nacht-Soll (nightMinutes) verteilt ist. Ein Dienst, keine Lücke.
+ *
+ * Bevorzugt Tage, an denen die Person ohnehin schließt; reichen die nicht,
+ * werden weitere ihrer Ladendienste zu Schließern umgedreht (retypeShift-Logik
+ * von Hand, damit die Ladenstunden exakt bleiben). Der Teil nach 20:00 wird als
+ * shift.nightMinutes vermerkt und bringt KEINE zusätzliche Pause.
  */
-function verteileReinigung(
+function extendNightShifts(
+  state: SchedulerState,
   emp: Employee,
-  tage: string[],
-  winStart: number,
-  maxPaid: number,
-  category: "NIGHT" | "SUNDAY",
-  ziel: number,
-  out: Shift[],
-): number {
-  if (ziel <= 0 || tage.length === 0) return 0;
-  const noetig = Math.min(tage.length, Math.ceil(ziel / maxPaid));
-  const gewaehlt = evenlySpaced(tage, noetig);
+  dayOf: (iso: string) => ResolvedDay,
+): void {
+  const ziel = emp.nightMinutes ?? 0;
+  if (ziel <= 0) return;
+
+  const closeOf = (iso: string) => dayOf(iso).window.endMinutes;
+  // Abendreinigung hängt nur an Tagen mit dem NORMALEN Ladenschluss 20:00 – an
+  // einem verkürzten Tag (Override) oder Feiertag gibt es keine Abendreinigung
+  // "tới 11g đêm".
+  const floors = state.shifts
+    .filter(
+      (s) =>
+        s.employeeId === emp.id &&
+        (s.category ?? "FLOOR") === "FLOOR" &&
+        weekdayKeyOf(parseIsoDate(s.date)) !== "sunday" &&
+        closeOf(s.date) === NIGHT_ANCHOR,
+    )
+    .sort((a, b) => a.date.localeCompare(b.date));
+  if (floors.length === 0) return;
+
+  const need = Math.min(floors.length, Math.ceil(ziel / NIGHT_MAX_PAID));
+
+  // Erst die schon vorhandenen Schließer, gleichmäßig übers Monat verteilt.
+  const schliesser = floors.filter((s) => s.endMinutes === closeOf(s.date));
+  let gewaehlt = evenlySpaced(schliesser, Math.min(need, schliesser.length));
+  if (gewaehlt.length < need) {
+    // Nicht genug Schließer: weitere Ladendienste zu Schließern umdrehen – aber
+    // NUR, wenn der Laden dadurch nicht offen und unbesetzt zurückbleibt. Ein
+    // umgedrehter Dienst nimmt der Öffnung seinen Aufsperrer; ohne diese Prüfung
+    // stand der Laden morgens um 9:30 leer.
+    const gesetzt = new Set(gewaehlt);
+    const rest = floors.filter((s) => !gesetzt.has(s) && s.endMinutes !== closeOf(s.date));
+    let fehlt = need - gewaehlt.length;
+    for (const s of evenlySpaced(rest, rest.length)) {
+      if (fehlt <= 0) break;
+      const day = dayOf(s.date);
+      const tpl = getShiftTemplate(
+        s.paidMinutes / 60,
+        "LATE",
+        day.window.startMinutes,
+        day.window.endMinutes,
+        emp.employmentType,
+      );
+      // Probe: die anderen Dienste des Tages plus dieser, umgedreht.
+      const andere = state.shifts.filter(
+        (x) => x.date === s.date && x !== s && (x.category ?? "FLOOR") === "FLOOR",
+      );
+      const probe = [
+        ...andere,
+        { ...s, startMinutes: tpl.startMinutes, endMinutes: tpl.endMinutes },
+      ];
+      if (uncoveredMinutes(probe, day.blocks) > 0) continue; // würde eine Lücke reißen
+      s.startMinutes = tpl.startMinutes;
+      s.endMinutes = tpl.endMinutes;
+      s.pauseMinutes = tpl.pauseMinutes;
+      s.shiftType = tpl.type;
+      gewaehlt.push(s);
+      fehlt -= 1;
+    }
+    gewaehlt.sort((a, b) => a.date.localeCompare(b.date));
+  }
+
   let rest = ziel;
-  let gelegt = 0;
   for (let i = 0; i < gewaehlt.length && rest > 0; i++) {
-    // Gleichmaessig: den Rest auf die verbleibenden Tage aufteilen, auf 15 min
-    // runden, aber nie ueber die Tagesobergrenze.
-    const proTag = Math.min(maxPaid, Math.round(rest / (gewaehlt.length - i) / 15) * 15);
-    const paid = Math.min(proTag > 0 ? proTag : 15, rest, maxPaid);
+    const proTag = Math.min(NIGHT_MAX_PAID, Math.round(rest / (gewaehlt.length - i) / 15) * 15);
+    const chunk = Math.min(proTag > 0 ? proTag : 15, rest, NIGHT_MAX_PAID);
+    if (chunk < 15) break;
+    const s = gewaehlt[i];
+    s.endMinutes += chunk; // durchgehend über 20:00 hinaus
+    s.paidMinutes += chunk;
+    s.nightMinutes = (s.nightMinutes ?? 0) + chunk;
+    rest -= chunk;
+  }
+}
+
+/**
+ * Legt die Sonntagsreinigung (eigene Dienste) für einen Mitarbeiter an und
+ * verteilt sie gleichmäßig auf die Sonntage des Monats.
+ */
+function scheduleSundayCleaning(emp: Employee, sonntage: string[], out: Shift[]): void {
+  const ziel = emp.sundayMinutes ?? 0;
+  if (ziel <= 0 || sonntage.length === 0) return;
+  const noetig = Math.min(sonntage.length, Math.ceil(ziel / SUNDAY_MAX_PAID));
+  const gewaehlt = evenlySpaced(sonntage, noetig);
+  let rest = ziel;
+  for (let i = 0; i < gewaehlt.length && rest > 0; i++) {
+    const proTag = Math.min(SUNDAY_MAX_PAID, Math.round(rest / (gewaehlt.length - i) / 15) * 15);
+    const paid = Math.min(proTag > 0 ? proTag : 15, rest, SUNDAY_MAX_PAID);
     if (paid < 15) break;
     const pause = calculatePause(paid, emp.employmentType);
     out.push({
       id: nextShiftId(),
       employeeId: emp.id,
       date: gewaehlt[i],
-      startMinutes: winStart,
-      endMinutes: winStart + paid + pause,
+      startMinutes: SUNDAY_CLEAN_START,
+      endMinutes: SUNDAY_CLEAN_START + paid + pause,
       pauseMinutes: pause,
       paidMinutes: paid,
       shiftType: "CUSTOM",
-      category,
+      category: "SUNDAY",
       generated: true,
     });
     rest -= paid;
-    gelegt += paid;
   }
-  return gelegt;
 }
 
-/** Legt die Reinigungsdienste (Nacht + Sonntag) fuer alle Mitarbeiter an. */
+/** Reinigung: Abend (Verlängerung) + Sonntag (eigene Dienste), für alle. */
 function scheduleZuschlag(
+  state: SchedulerState,
   employees: Employee[],
   dates: string[],
   dayOf: (iso: string) => ResolvedDay,
-  out: Shift[],
 ): void {
-  const abendTage = dates.filter(
-    (d) => weekdayKeyOf(parseIsoDate(d)) !== "sunday" && !dayOf(d).closed,
-  );
   const sonntage = dates.filter((d) => weekdayKeyOf(parseIsoDate(d)) === "sunday");
-
   for (const emp of employees) {
-    if (emp.nightMinutes && emp.nightMinutes > 0) {
-      verteileReinigung(
-        emp, abendTage, NIGHT_START, NIGHT_END - NIGHT_START, "NIGHT", emp.nightMinutes, out,
-      );
-    }
-    if (emp.sundayMinutes && emp.sundayMinutes > 0) {
-      verteileReinigung(
-        emp, sonntage, SUNDAY_CLEAN_START, SUNDAY_MAX_PAID, "SUNDAY", emp.sundayMinutes, out,
-      );
-    }
+    extendNightShifts(state, emp, dayOf);
+    scheduleSundayCleaning(emp, sonntage, state.shifts);
   }
 }
-
 
 export function generateSchedule(input: GenerateInput): Shift[] {
   shiftIdCounter = 0;
@@ -2183,7 +2246,7 @@ export function generateSchedule(input: GenerateInput): Shift[] {
 
   // Reinigung (Nacht + Sonntag) als eigene Dienste anhaengen. Laeuft NACH dem
   // Ladenplan, weil sie eigene Toepfe sind und die Stosszeit-Logik nicht beruehrt.
-  scheduleZuschlag(employees, dates, dayOf, state.shifts);
+  scheduleZuschlag(state, employees, dates, dayOf);
 
   // Stabil sortieren: nach Datum, dann Startzeit, dann Mitarbeiter.
   state.shifts.sort(

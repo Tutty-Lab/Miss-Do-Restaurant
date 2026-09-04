@@ -78,7 +78,7 @@ export function DocsTab() {
       <Section title="Nguyên tắc bắt buộc (luôn đúng)">
         <ul className="list-disc pl-5 space-y-1">
           <li>Tối đa <b>9 giờ công</b> mỗi ngày cho một người.</li>
-          <li>Mỗi người <b>một ca bán hàng mỗi ngày</b> (ca lau chùi buổi tối tính riêng, xem dưới).</li>
+          <li>Mỗi người <b>một ca bán hàng mỗi ngày</b> (giờ lau chùi buổi tối nối luôn vào ca đó, xem dưới).</li>
           <li>Không làm quá <b>6 ngày liên tiếp</b> (tính ca bán hàng).</li>
           <li>
             Mỗi người phải đạt <b>đúng định mức tháng</b> (Sollstunden) — không thừa, không thiếu.
@@ -107,10 +107,14 @@ export function DocsTab() {
             đặt ở tab <b>Nhân viên</b>:
             <br />
             <span className="text-slate-500">
-              <b>Lau chùi buổi tối (Nachtzuschlag)</b>: sau khi đóng cửa, <b>20:00–23:00</b>, tối đa
-              3h/ngày, các ngày T2–T7. <b>Lau chùi chủ nhật (Sonntagszuschlag)</b>: 10:00–20:00, tối
-              đa 8h mỗi chủ nhật. Ai được đặt số giờ lau chùi thì app tự xếp thêm ca vào đúng khung
-              đó. Nếu không xếp đủ thì chỉ <b>cảnh báo</b>.
+              <b>Lau chùi buổi tối (Nachtzuschlag)</b>: input là <b>số giờ 1 tháng</b>. App
+              chọn ngày người đó đóng cửa rồi <b>làm nối tiếp qua 20:00</b> — ví dụ thêm 2 tiếng
+              thì làm tới 20:00 rồi làm thẳng tới 22:00, <b>một ca liền, không ngắt</b>. Tối đa
+              3h/ngày (tới 23:00). Phần sau 20:00 là giờ Nachtzuschlag, không tính vào định mức
+              bán hàng. Nếu không đủ ngày đóng cửa để nối cho hết thì chỉ <b>cảnh báo</b>.
+              <br />
+              <b>Lau chùi chủ nhật (Sonntagszuschlag)</b>: quán đóng cửa CN nên đây là ca riêng,
+              10:00–20:00, tối đa 8h mỗi chủ nhật.
             </span>
           </li>
         </ul>

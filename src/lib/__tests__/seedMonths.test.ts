@@ -53,8 +53,8 @@ describe.each(runs)("Seed-Monat: $seed.label", ({ seed, shifts, floor, analysis 
   it("trifft jeden Reinigungs-Topf (Nacht + Sonntag) exakt", () => {
     for (const emp of seed.employees) {
       const night = shifts
-        .filter((s) => s.employeeId === emp.id && s.category === "NIGHT")
-        .reduce((sum, s) => sum + s.paidMinutes, 0);
+        .filter((s) => s.employeeId === emp.id)
+        .reduce((sum, s) => sum + (s.nightMinutes ?? 0), 0);
       const sunday = shifts
         .filter((s) => s.employeeId === emp.id && s.category === "SUNDAY")
         .reduce((sum, s) => sum + s.paidMinutes, 0);
@@ -79,11 +79,14 @@ describe.each(runs)("Seed-Monat: $seed.label", ({ seed, shifts, floor, analysis 
     const byId = new Map(seed.employees.map((e) => [e.id, e] as const));
     for (const s of shifts) {
       const typ = byId.get(s.employeeId)?.employmentType;
-      expect(s.pauseMinutes).toBe(calculatePause(s.paidMinutes, typ));
+      const ladenPaid = s.paidMinutes - (s.nightMinutes ?? 0);
+      // Pause und 9-h-Grenze gelten für den Ladenanteil; die Abendverlängerung
+      // bringt keine Pause.
+      expect(s.pauseMinutes).toBe(calculatePause(ladenPaid, typ));
       expect(s.endMinutes - s.startMinutes - s.pauseMinutes).toBe(s.paidMinutes);
       if (isFloor(s)) {
-        expect(s.paidMinutes).toBeGreaterThanOrEqual(3 * 60);
-        expect(s.paidMinutes).toBeLessThanOrEqual(9 * 60);
+        expect(ladenPaid).toBeGreaterThanOrEqual(3 * 60);
+        expect(ladenPaid).toBeLessThanOrEqual(9 * 60);
       } else {
         expect(s.paidMinutes).toBeLessThanOrEqual(8 * 60);
       }
@@ -115,16 +118,17 @@ describe.each(runs)("Seed-Monat: $seed.label", ({ seed, shifts, floor, analysis 
     expect(luecken).toEqual([]);
   });
 
-  it("Ladendienst liegt komplett im Öffnungsfenster 9:30–20:00", () => {
+  it("Ladendienst: Beginn ab 9:30, Ende 20:00 (oder Abendverlängerung bis 23:00)", () => {
     for (const s of floor) {
       expect(s.startMinutes).toBeGreaterThanOrEqual(9 * 60 + 30);
-      expect(s.endMinutes).toBeLessThanOrEqual(20 * 60);
+      expect(s.endMinutes).toBeLessThanOrEqual((s.nightMinutes ?? 0) > 0 ? 23 * 60 : 20 * 60);
     }
   });
 
-  it("Reinigung: Nacht 20:00–23:00, Sonntag an Sonntagen", () => {
-    for (const s of shifts.filter((x) => x.category === "NIGHT")) {
-      expect(s.startMinutes).toBeGreaterThanOrEqual(20 * 60);
+  it("Abendreinigung verlängert einen Dienst über 20:00, Sonntag an Sonntagen", () => {
+    for (const s of shifts.filter((x) => (x.nightMinutes ?? 0) > 0)) {
+      expect(s.category ?? "FLOOR").toBe("FLOOR");
+      expect(s.endMinutes - 20 * 60).toBe(s.nightMinutes);
       expect(s.endMinutes).toBeLessThanOrEqual(23 * 60);
       expect(new Date(`${s.date}T12:00:00Z`).getUTCDay()).not.toBe(0);
     }
