@@ -56,6 +56,7 @@ export function StundenzettelPage({
         <Info label="Firmenname" value={schedule.companyName || "—"} />
         <Info label="Beschäftigungsart" value={employmentLabelDe(employee.employmentType)} />
         <Info label="Mitarbeiter" value={employee.name} />
+        <Info label="Personalnummer" value={employee.persNr || "—"} />
         <Info label="Monat" value={MONTH_NAMES_DE[schedule.month - 1]} />
         {/*
           Sollstunden bleibt auf dem Zettel bewusst LEER: der Betrieb trägt den

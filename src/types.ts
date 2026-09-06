@@ -45,6 +45,13 @@ export type ShiftCategory = "FLOOR" | "SUNDAY";
 export type Employee = {
   id: string;
   name: string;
+  /**
+   * Personalnummer (Pers.-Nr.) laut Lohnbuchhaltung. Freitext, weil sie führende
+   * Nullen oder Buchstaben enthalten kann. Rein informativ – steht auf dem
+   * Stundenzettel, hat auf die Planung keinen Einfluss. Fehlt/leer = nicht
+   * gesetzt.
+   */
+  persNr?: string;
   employmentType: EmploymentType;
   /** Monatliches Soll in Minuten (Integer). 176 h => 10560. */
   targetMinutes: number;

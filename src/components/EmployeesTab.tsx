@@ -30,6 +30,7 @@ function splitInfo(targetHours: number, type: EmploymentType): { ok: boolean; te
  */
 type Draft = {
   name: string;
+  persNr: string;
   employmentType: EmploymentType;
   hours: string;
   availableWeekdays: WeekdayKey[]; // [] = alle Tage
@@ -41,6 +42,7 @@ type Draft = {
 function draftFrom(emp?: Employee): Draft {
   return {
     name: emp?.name ?? "",
+    persNr: emp?.persNr ?? "",
     employmentType: emp?.employmentType ?? "VOLLZEIT",
     hours: emp ? String(emp.targetMinutes / 60) : "176",
     availableWeekdays: emp?.availableWeekdays ?? [],
@@ -58,6 +60,7 @@ function draftToEmployee(d: Draft): Omit<Employee, "id"> {
   const sonntag = Number(d.sundayHours);
   return {
     name: d.name.trim() || "Nhân viên mới",
+    persNr: d.persNr.trim() || undefined,
     employmentType: d.employmentType,
     targetMinutes: stunden * 60,
     availableWeekdays: d.availableWeekdays.length > 0 ? d.availableWeekdays : undefined,
@@ -173,6 +176,11 @@ function EmployeeSummaryRow({ emp }: { emp: Employee }) {
   return (
     <div className="flex-1 min-w-0">
       <div className="flex items-center gap-2">
+        {emp.persNr ? (
+          <span className="shrink-0 rounded bg-slate-800 text-white text-[11px] px-1.5 py-0.5">
+            #{emp.persNr}
+          </span>
+        ) : null}
         <span className="font-medium text-slate-900 truncate">{emp.name}</span>
         <span className="shrink-0 rounded bg-slate-100 text-slate-600 text-[11px] px-1.5 py-0.5">
           {employmentShortVi(emp.employmentType)}
@@ -260,16 +268,28 @@ function EmployeeSheet({
         </div>
 
         <div className="px-4 py-3 space-y-4">
-          <label className="block">
-            <span className="text-xs text-slate-600">Tên</span>
-            <input
-              autoFocus={!employee}
-              className={`${inputClass} w-full mt-1`}
-              value={d.name}
-              onChange={(e) => set("name", e.target.value)}
-              placeholder="Tên nhân viên"
-            />
-          </label>
+          <div className="grid grid-cols-[1fr_auto] gap-3">
+            <label className="block">
+              <span className="text-xs text-slate-600">Tên</span>
+              <input
+                autoFocus={!employee}
+                className={`${inputClass} w-full mt-1`}
+                value={d.name}
+                onChange={(e) => set("name", e.target.value)}
+                placeholder="Tên nhân viên"
+              />
+            </label>
+            <label className="block">
+              <span className="text-xs text-slate-600">Pers.-Nr.</span>
+              <input
+                inputMode="numeric"
+                className={`${inputClass} mt-1 w-20`}
+                value={d.persNr}
+                onChange={(e) => set("persNr", e.target.value)}
+                placeholder="VD 5"
+              />
+            </label>
+          </div>
 
           <div className="grid grid-cols-2 gap-3">
             <label className="block">
