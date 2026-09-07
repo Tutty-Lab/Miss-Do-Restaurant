@@ -315,6 +315,21 @@ export function ScheduleTab({ store }: { store: UseScheduleReturn }) {
                               <div className="text-[10px] opacity-80">
                                 {minutesToShortHours(shift.paidMinutes)} · Nghỉ {shift.pauseMinutes}
                               </div>
+                              {/* Zuschläge markieren: Sonntagsreinigung + Nachtanteil. */}
+                              {(shift.category === "SUNDAY" || shift.nightMinutes) && (
+                                <div className="mt-0.5 flex flex-wrap justify-center gap-0.5">
+                                  {shift.category === "SUNDAY" && (
+                                    <span className="rounded bg-amber-100 text-amber-800 text-[9px] px-1 leading-tight">
+                                      CN dọn
+                                    </span>
+                                  )}
+                                  {shift.nightMinutes ? (
+                                    <span className="rounded bg-indigo-100 text-indigo-800 text-[9px] px-1 leading-tight">
+                                      đêm {minutesToShortHours(shift.nightMinutes)}
+                                    </span>
+                                  ) : null}
+                                </div>
+                              )}
                             </div>
                           ) : (
                             <span className="text-[11px]">Nghỉ</span>

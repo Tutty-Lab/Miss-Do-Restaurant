@@ -31,6 +31,13 @@ function ShiftCell({ shift, closed }: { shift: Shift | undefined; closed: boolea
         {minutesToShortHours(shift.paidMinutes)}
         {shift.pauseMinutes > 0 && ` · P ${shift.pauseMinutes}`}
       </div>
+      {(shift.category === "SUNDAY" || shift.nightMinutes) && (
+        <div className="text-[9px] font-medium text-slate-700 whitespace-nowrap">
+          {shift.category === "SUNDAY" ? "So-Reinigung" : ""}
+          {shift.category === "SUNDAY" && shift.nightMinutes ? " · " : ""}
+          {shift.nightMinutes ? `Nacht ${minutesToShortHours(shift.nightMinutes)}` : ""}
+        </div>
+      )}
     </>
   );
 }

@@ -88,7 +88,15 @@ export function StundenzettelPage({
             const isWeekend = wd === "Samstag" || wd === "Sonntag";
             let bemerkung: string;
             if (s) {
-              bemerkung = holiday ? `Feiertag: ${holiday}` : "";
+              // Zuschläge klar ausweisen: Sonntagsreinigung und der Nachtanteil
+              // (Arbeit nach 20:00 bis 23:00) stehen als Bemerkung dabei.
+              const teile: string[] = [];
+              if (holiday) teile.push(`Feiertag: ${holiday}`);
+              if (s.category === "SUNDAY") teile.push("Sonntagszuschlag (Reinigung)");
+              if (s.nightMinutes) {
+                teile.push(`Nachtzuschlag ${minutesToDecimalHours(s.nightMinutes)} h (ab 20:00)`);
+              }
+              bemerkung = teile.join(" · ");
             } else if (closed) {
               bemerkung = closed.note || "Betriebsruhe";
             } else if (holiday) {

@@ -2082,11 +2082,28 @@ function extendNightShifts(
  * Legt die Sonntagsreinigung (eigene Dienste) für einen Mitarbeiter an und
  * verteilt sie gleichmäßig auf die Sonntage des Monats.
  */
-function scheduleSundayCleaning(emp: Employee, sonntage: string[], out: Shift[]): void {
+function scheduleSundayCleaning(
+  emp: Employee,
+  sonntage: string[],
+  out: Shift[],
+  /** Anzahl bereits vergebener Sonntagsdienste je Sonntag – über ALLE Kräfte. */
+  load: Map<string, number>,
+): void {
   const ziel = emp.sundayMinutes ?? 0;
   if (ziel <= 0 || sonntage.length === 0) return;
   const noetig = Math.min(sonntage.length, Math.ceil(ziel / SUNDAY_MAX_PAID));
-  const gewaehlt = evenlySpaced(sonntage, noetig);
+  // Die am WENIGSTEN belegten Sonntage zuerst (über alle Mitarbeiter hinweg),
+  // damit sich die Sonntagsreinigung gleichmäßig auf alle Sonntage verteilt.
+  // Vorher wählte jede Kraft unabhängig „gleichmäßig verteilt" – und weil das
+  // deterministisch ist, landeten alle auf denselben zwei, drei Sonntagen,
+  // während andere leer blieben.
+  const gewaehlt = sonntage
+    .map((d, idx) => ({ d, idx }))
+    .sort((a, b) => (load.get(a.d) ?? 0) - (load.get(b.d) ?? 0) || a.idx - b.idx)
+    .slice(0, noetig)
+    .sort((a, b) => a.idx - b.idx)
+    .map((x) => x.d);
+  for (const d of gewaehlt) load.set(d, (load.get(d) ?? 0) + 1);
   let rest = ziel;
   for (let i = 0; i < gewaehlt.length && rest > 0; i++) {
     const proTag = Math.min(SUNDAY_MAX_PAID, Math.round(rest / (gewaehlt.length - i) / 15) * 15);
@@ -2122,10 +2139,16 @@ function scheduleZuschlag(
   const sonntage = dates.filter(
     (d) => weekdayKeyOf(parseIsoDate(d)) === "sunday" && dayOf(d).closed,
   );
-  for (const emp of employees) {
-    extendNightShifts(state, emp, dayOf);
-    scheduleSundayCleaning(emp, sonntage, state.shifts);
-  }
+  // Gemeinsame Belegung je Sonntag, damit sich die Sonntagsreinigung über alle
+  // Kräfte gleichmäßig auf die Sonntage verteilt (nicht alle auf denselben).
+  const sundayLoad = new Map<string, number>(sonntage.map((d) => [d, 0]));
+  // Kräfte mit dem HÖCHSTEN Sonntags-Soll zuerst: sie brauchen die meisten
+  // Sonntage und sollen die Verteilung anführen, die kleineren füllen auf.
+  const nachSonntag = [...employees].sort(
+    (a, b) => (b.sundayMinutes ?? 0) - (a.sundayMinutes ?? 0),
+  );
+  for (const emp of employees) extendNightShifts(state, emp, dayOf);
+  for (const emp of nachSonntag) scheduleSundayCleaning(emp, sonntage, state.shifts, sundayLoad);
 }
 
 export function generateSchedule(input: GenerateInput): Shift[] {
