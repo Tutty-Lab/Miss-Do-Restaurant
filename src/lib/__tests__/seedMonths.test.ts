@@ -50,18 +50,6 @@ describe.each(runs)("Seed-Monat: $seed.label", ({ seed, shifts, floor, analysis 
     }
   });
 
-  it("trifft jeden Reinigungs-Topf (Nacht + Sonntag) exakt", () => {
-    for (const emp of seed.employees) {
-      const night = shifts
-        .filter((s) => s.employeeId === emp.id)
-        .reduce((sum, s) => sum + (s.nightMinutes ?? 0), 0);
-      const sunday = shifts
-        .filter((s) => s.employeeId === emp.id && s.category === "SUNDAY")
-        .reduce((sum, s) => sum + s.paidMinutes, 0);
-      expect(night).toBe(emp.nightMinutes ?? 0);
-      expect(sunday).toBe(emp.sundayMinutes ?? 0);
-    }
-  });
 
   it("besteht die Validierung ohne harte Fehler", () => {
     const result = validateSchedule(seed.employees, shifts);
@@ -118,22 +106,21 @@ describe.each(runs)("Seed-Monat: $seed.label", ({ seed, shifts, floor, analysis 
     expect(luecken).toEqual([]);
   });
 
-  it("Ladendienst: Beginn ab 9:30, Ende 20:00 (oder Abendverlängerung bis 23:00)", () => {
+  it("Ladendienst: Beginn ab 9:30, Ende 22:00", () => {
     for (const s of floor) {
       expect(s.startMinutes).toBeGreaterThanOrEqual(9 * 60 + 30);
-      expect(s.endMinutes).toBeLessThanOrEqual((s.nightMinutes ?? 0) > 0 ? 23 * 60 : 20 * 60);
+      expect(s.endMinutes).toBeLessThanOrEqual(22 * 60);
     }
   });
 
-  it("Abendreinigung verlängert einen Dienst über 20:00, Sonntag an Sonntagen", () => {
-    for (const s of shifts.filter((x) => (x.nightMinutes ?? 0) > 0)) {
-      expect(s.category ?? "FLOOR").toBe("FLOOR");
-      expect(s.endMinutes - 20 * 60).toBe(s.nightMinutes);
-      expect(s.endMinutes).toBeLessThanOrEqual(23 * 60);
-      expect(new Date(`${s.date}T12:00:00Z`).getUTCDay()).not.toBe(0);
-    }
-    for (const s of shifts.filter((x) => x.category === "SUNDAY")) {
-      expect(new Date(`${s.date}T12:00:00Z`).getUTCDay()).toBe(0);
+  it("has exactly one continuous closer from 20:00 to 22:00 on every open weekday", () => {
+    const dates = new Set(shifts.filter(isFloor).map((s) => s.date));
+    for (const date of dates) {
+      const night = shifts.filter((s) => s.date === date && s.endMinutes > 1200);
+      expect(night, date).toHaveLength(1);
+      expect(night[0].startMinutes).toBeLessThan(1200);
+      expect(night[0].endMinutes).toBe(1320);
+      expect(night[0].paidMinutes).toBeLessThanOrEqual(540);
     }
   });
 

@@ -39,19 +39,19 @@ export type SeedMonth = {
   maxPeakGaps?: number;
 };
 
-/** Die volle Belegschaft laut Screenshot – inkl. Reinigungs-Töpfe. */
+/** Die volle Belegschaft laut Screenshot – ohne separate Reinigungssollstunden. */
 const VOLL: Employee[] = [
   makeEmployee("ma-1", "Nhân viên 1", "TEILZEIT", 79),
   makeEmployee("ma-2", "Nhân viên 2", "TEILZEIT", 68),
-  makeEmployee("ma-3", "Nhân viên 3", "TEILZEIT", 50, { sundayHours: 20 }),
+  makeEmployee("ma-3", "Nhân viên 3", "TEILZEIT", 50),
   makeEmployee("ma-4", "Nhân viên 4", "VOLLZEIT", 128),
-  makeEmployee("ma-5", "Nhân viên 5", "TEILZEIT", 76, { sundayHours: 20 }),
-  makeEmployee("ma-6", "Nhân viên 6", "TEILZEIT", 55, { sundayHours: 20 }),
+  makeEmployee("ma-5", "Nhân viên 5", "TEILZEIT", 76),
+  makeEmployee("ma-6", "Nhân viên 6", "TEILZEIT", 55),
   makeEmployee("ma-7", "Nhân viên 7", "TEILZEIT", 90),
   makeEmployee("ma-8", "Nhân viên 8", "MINIJOB", 22),
-  makeEmployee("ma-9", "Nhân viên 9", "TEILZEIT", 115, { nightHours: 55, sundayHours: 20 }),
+  makeEmployee("ma-9", "Nhân viên 9", "TEILZEIT", 115),
   makeEmployee("ma-10", "Nhân viên 10", "MINIJOB", 40),
-  makeEmployee("ma-11", "Nhân viên 11", "VOLLZEIT", 120, { nightHours: 30, sundayHours: 31 }),
+  makeEmployee("ma-11", "Nhân viên 11", "VOLLZEIT", 120),
   makeEmployee("ma-12", "Nhân viên 12", "MINIJOB", 22),
   makeEmployee("ma-13", "Nhân viên 13", "MINIJOB", 22),
   makeEmployee("ma-14", "Nhân viên 14", "MINIJOB", 22),
@@ -78,6 +78,9 @@ export function scheduleForSeed(seed: SeedMonth): Schedule {
     year: seed.year,
     month: seed.month,
     workHours: structuredClone(DEFAULT_WORK_HOURS),
+    surchargeModelVersion: 2,
+    surchargeConfig: { after20Percent: 0, sundayPercent: 0 },
+    sundayCleaningMinutes: 120,
     dateOverrides: [],
     employees: seed.employees.map((e) => ({ ...e })),
     shifts: [],

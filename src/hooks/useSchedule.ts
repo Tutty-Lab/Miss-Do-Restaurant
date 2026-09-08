@@ -13,12 +13,10 @@ import { MIN_PASSWORD_LENGTH, hashPassword, passwordMatches } from "../lib/auth"
 import { isRemoteConfigured, loadRemote, saveRemote, type RemoteStatus } from "../lib/remote";
 import { createManualShift, updateShiftTimes } from "../lib/shiftOps";
 import {
-  DEFAULT_WORK_HOURS,
-  normalizeWorkHours,
   type DateOverride,
   type OverrideMap,
 } from "../lib/workHours";
-import { COMPANY_ADDRESS, COMPANY_NAME } from "../lib/company";
+import { emptySchedule, normalizeSchedule, workHoursForGeneration } from "../lib/scheduleDefaults";
 
 /**
  * Steht in diesem Stand überhaupt etwas? Maßstab sind Mitarbeiter und
@@ -28,44 +26,11 @@ function hatInhalt(state: PersistedState): boolean {
   return state.schedule.employees.length > 0 || state.schedule.shifts.length > 0;
 }
 
-function emptySchedule(): Schedule {
-  const now = new Date();
-  return {
-    companyName: COMPANY_NAME,
-    address: COMPANY_ADDRESS,
-    year: now.getFullYear(),
-    month: now.getMonth() + 1,
-    workHours: structuredClone(DEFAULT_WORK_HOURS),
-    dateOverrides: [],
-    employees: [],
-    shifts: [],
-  };
-}
-
 /** Ausnahmen-Array -> nach Datum indizierte Map (für den Scheduler). */
 function overridesToMap(list: DateOverride[]): OverrideMap {
   const map: OverrideMap = {};
   for (const ov of list) map[ov.date] = ov;
   return map;
-}
-
-/** Migriert einen (evtl. alten) gespeicherten Stand auf das aktuelle Schema. */
-function normalizeSchedule(raw: Schedule | undefined): Schedule {
-  const base = emptySchedule();
-  if (!raw) return base;
-  return {
-    // Firmenname & Adresse sind fest (không cho sửa) – immer erzwingen.
-    companyName: COMPANY_NAME,
-    address: COMPANY_ADDRESS,
-    year: raw.year ?? base.year,
-    month: raw.month ?? base.month,
-    workHours: normalizeWorkHours(raw.workHours),
-    dateOverrides: Array.isArray(raw.dateOverrides) ? raw.dateOverrides : [],
-    employees: raw.employees ?? [],
-    shifts: raw.shifts ?? [],
-    lockedAt: raw.lockedAt,
-    printedWeeks: Array.isArray(raw.printedWeeks) ? raw.printedWeeks : [],
-  };
 }
 
 function newEmployeeId(): string {
@@ -192,8 +157,8 @@ export function useSchedule() {
   }, [schedule, originalShifts, passwordHash]);
 
   const validation: ValidationResult = useMemo(
-    () => validateSchedule(schedule.employees, schedule.shifts),
-    [schedule.employees, schedule.shifts],
+    () => validateSchedule(schedule.employees, schedule.shifts, schedule.surchargeModelVersion === 2),
+    [schedule.employees, schedule.shifts, schedule.surchargeModelVersion],
   );
 
   /**
@@ -366,14 +331,16 @@ export function useSchedule() {
     // ist überholt, die „gedruckt"-Häkchen der Wochen verschwinden mit.
     setGenError(null);
     try {
+      const workHours = workHoursForGeneration(schedule);
       const shifts = generateSchedule({
         year: schedule.year,
         month: schedule.month,
-        workHours: schedule.workHours,
+        workHours,
         overrides: overridesToMap(schedule.dateOverrides),
         employees: schedule.employees,
+        sundayCleaningMinutes: schedule.sundayCleaningMinutes,
       });
-      setSchedule((s) => ({ ...s, shifts, lockedAt: undefined, printedWeeks: [] }));
+      setSchedule((s) => ({ ...s, workHours, shifts, surchargeModelVersion: 2, lockedAt: undefined, printedWeeks: [] }));
       setOriginalShifts(shifts.map((sh) => ({ ...sh })));
     } catch (err) {
       setGenError(err instanceof Error ? err.message : String(err));
@@ -384,6 +351,8 @@ export function useSchedule() {
     schedule.workHours,
     schedule.dateOverrides,
     schedule.employees,
+    schedule.sundayCleaningMinutes,
+    schedule.surchargeModelVersion,
     isLocked,
   ]);
 

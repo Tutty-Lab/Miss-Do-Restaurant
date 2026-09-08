@@ -52,6 +52,46 @@ body {
   pointer-events: none;
 }
 
+/* Leave room for the separate night lines and surcharge totals on one A4 page. */
+.miss-do-timesheet table {
+  font-size: 10px;
+  line-height: 12px;
+}
+.miss-do-timesheet td {
+  padding: 1px 4px;
+}
+.miss-do-timesheet th {
+  padding: 2px 4px;
+}
+.miss-do-timesheet td > div {
+  min-height: 12px;
+}
+.miss-do-timesheet-dense table {
+  font-size: 9px;
+  line-height: 10px;
+}
+.miss-do-timesheet-dense td > div {
+  min-height: 10px;
+}
+.miss-do-timesheet-dense td {
+  padding-top: 0.5px;
+  padding-bottom: 0.5px;
+}
+.miss-do-timesheet-dense > div {
+  font-size: 11px;
+  line-height: 14px;
+}
+.miss-do-timesheet-dense > .grid {
+  row-gap: 2px;
+}
+.miss-do-timesheet-dense > div:first-child {
+  margin-bottom: 8px;
+  padding-bottom: 4px;
+}
+.miss-do-timesheet-dense > div:last-child {
+  margin-top: 8px;
+}
+
 /* ===================== Druck: Stundenzettel ===================== */
 @media print {
   body {

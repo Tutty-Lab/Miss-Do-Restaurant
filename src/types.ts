@@ -34,13 +34,23 @@ export type ShiftType = "EARLY" | "LATE" | "CUSTOM";
 /**
  * Lohn-relevante Art eines Dienstes. Fehlt = FLOOR (normaler Ladendienst).
  *
- * Die ABENDreinigung ist KEINE eigene Kategorie: sie hängt als Verlängerung an
- * einem Ladendienst, der um 20:00 schließt. Wie viele Minuten davon nach 20:00
- * liegen (Nachtzuschlag), steht in shift.nightMinutes – der Dienst bleibt EIN
- * durchgehender Dienst ("ko ngắt ca"). Nur die SONNTAGsreinigung ist ein
- * eigener Dienst, weil der Laden sonntags zu ist.
+ * Der Abendteil (nach 20:00) ist KEINE eigene Kategorie: der schließende Dienst
+ * läuft einfach bis 22:00 durch; die Minuten nach 20:00 sind Nachtzuschlag und
+ * werden aus den Zeiten berechnet (lib/zuschlaege). Nur die SONNTAGsreinigung
+ * ist ein eigener Dienst, weil der Laden sonntags zu ist.
  */
 export type ShiftCategory = "FLOOR" | "SUNDAY";
+
+/**
+ * Zuschläge in Prozent (wie thienlong). Die Zuschläge werden AUS den geplanten
+ * Zeiten berechnet, nicht mehr als eigene „Reinigungs"-Töpfe je Person geführt:
+ *  - after20Percent: Aufschlag auf Minuten nach 20:00 (Mo–Sa).
+ *  - sundayPercent:  Aufschlag auf am Sonntag gearbeitete Minuten.
+ */
+export type SurchargeConfig = {
+  after20Percent: number;
+  sundayPercent: number;
+};
 
 export type Employee = {
   id: string;
@@ -77,24 +87,8 @@ export type Employee = {
    * Fehlt das Feld, begrenzt nur die Sechs-Tage-Regel des Gesetzes.
    */
   maxDaysPerWeek?: number;
-  /**
-   * Zusätzliche Reinigungsstunden am Abend nach Ladenschluss (Nachtzuschlag),
-   * 20:00–23:00. Monats-Soll in Minuten. Fehlt/0 = diese Person reinigt abends
-   * nicht.
-   *
-   * Umgesetzt als VERLÄNGERUNG des schließenden Ladendienstes über 20:00 hinaus:
-   * wer dienstags 2 Stunden Abendreinigung macht, arbeitet bis 20:00 und dann
-   * durchgehend bis 22:00 – ein Dienst, nicht zwei ("ko ngắt ca"). Diese Minuten
-   * zählen NICHT gegen targetMinutes, bleiben aber als shift.nightMinutes sichtbar.
-   */
+  /** Legacy monthly cleaning targets; retained for previously saved schedules. */
   nightMinutes?: number;
-  /**
-   * Zusätzliche Reinigungsstunden am Sonntag (Sonntagszuschlag). Monats-Soll in
-   * Minuten. Fehlt/0 = diese Person reinigt sonntags nicht.
-   *
-   * Der Laden ist sonntags normalerweise zu; die Sonntagsreinigung läuft
-   * trotzdem und ist ein eigener Topf, getrennt von targetMinutes.
-   */
   sundayMinutes?: number;
 };
 
@@ -114,13 +108,7 @@ export type Shift = {
    * reinigung). Die Abendreinigung ist keine eigene Kategorie (siehe unten).
    */
   category?: ShiftCategory;
-  /**
-   * Minuten dieses (FLOOR-)Dienstes, die als ABENDreinigung nach 20:00 liegen
-   * (Nachtzuschlag). Diese Minuten stecken in endMinutes und paidMinutes, sind
-   * aber KEINE Ladenstunden: das Ladensoll zählt paidMinutes − nightMinutes.
-   * Für die Pause zählt nur der Ladenanteil – die Verlängerung bringt keine
-   * zusätzliche Pause ("ko ngắt ca").
-   */
+  /** Legacy night extension; new schedules derive surcharges from shift times. */
   nightMinutes?: number;
   /** true = automatisch generiert, false = manuell hinzugefügt/geändert. */
   generated: boolean;
@@ -135,6 +123,16 @@ export type Schedule = {
   month: number;
   /** Arbeitszeit-Fenster (giờ làm) je Wochentag + Feiertag. */
   workHours: WorkHoursConfig;
+  /** Missing/1 = legacy separate targets; 2 = all paid work counts toward target. */
+  surchargeModelVersion?: 1 | 2;
+  /** Zuschläge in Prozent (Nacht nach 20:00, Sonntag). Fehlt = 0/0. */
+  surchargeConfig?: SurchargeConfig;
+  /**
+   * Bezahlte Reinigungsminuten je geschlossenem Sonntag (ein Dienst pro Sonntag,
+   * reihum vergeben). 0/fehlt = keine Sonntagsreinigung. Zählt gegen das
+   * Monats-Soll der eingeteilten Person und bekommt den Sonntagszuschlag.
+   */
+  sundayCleaningMinutes?: number;
   /** Ausnahmen für einzelne Daten (geschlossen / abweichende Zeiten). */
   dateOverrides: DateOverride[];
   employees: Employee[];
@@ -157,4 +155,3 @@ export type ShiftToken = {
   employeeId: string;
   paidMinutes: number;
 };
-

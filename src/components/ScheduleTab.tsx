@@ -1,3 +1,4 @@
+import { shiftMinutesAfter20 } from "../lib/zuschlaege";
 import { useMemo, useState } from "react";
 import type { UseScheduleReturn } from "../hooks/useSchedule";
 import type { Shift } from "../types";
@@ -342,16 +343,16 @@ export function ScheduleTab({ store }: { store: UseScheduleReturn }) {
                                 {minutesToShortHours(shift.paidMinutes)} · Nghỉ {shift.pauseMinutes}
                               </div>
                               {/* Zuschläge markieren: Sonntagsreinigung + Nachtanteil. */}
-                              {(shift.category === "SUNDAY" || shift.nightMinutes) && (
+                              {(shift.category === "SUNDAY" || shiftMinutesAfter20(shift)) && (
                                 <div className="mt-0.5 flex flex-wrap justify-center gap-0.5">
                                   {shift.category === "SUNDAY" && (
                                     <span className="rounded bg-amber-100 text-amber-800 text-[9px] px-1 leading-tight">
                                       CN dọn
                                     </span>
                                   )}
-                                  {shift.nightMinutes ? (
+                                  {shiftMinutesAfter20(shift) ? (
                                     <span className="rounded bg-indigo-100 text-indigo-800 text-[9px] px-1 leading-tight">
-                                      đêm {minutesToShortHours(shift.nightMinutes)}
+                                      đêm {minutesToShortHours(shiftMinutesAfter20(shift))}
                                     </span>
                                   ) : null}
                                 </div>

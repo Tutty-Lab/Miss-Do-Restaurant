@@ -9,6 +9,7 @@ import { minutesToDecimalHours, minutesToTime } from "../lib/time";
 import { MONTH_NAMES_DE } from "../lib/dateFormat";
 import { publicHolidayNames } from "../lib/holidays";
 import { format } from "date-fns";
+import { calculateZuschlaege, timesheetParts } from "../lib/zuschlaege";
 import { employmentLabelDe } from "../lib/employment";
 
 // Deutscher Monats-Titel für das offizielle Dokument.
@@ -34,19 +35,23 @@ export function StundenzettelPage({
   periodLabel?: string;
 }) {
   const rows = dates ?? datesOfMonth(schedule.year, schedule.month);
-  const byDate = new Map<string, Shift>();
+  const byDate = new Map<string, Shift[]>();
   for (const s of schedule.shifts) {
-    if (s.employeeId === employee.id) byDate.set(s.date, s);
+    if (s.employeeId === employee.id) byDate.set(s.date, [...(byDate.get(s.date) ?? []), s]);
   }
 
-  const totalMinutes = rows.reduce((a, d) => a + (byDate.get(d)?.paidMinutes ?? 0), 0);
+  const shownShifts = rows.flatMap((d) => byDate.get(d) ?? []);
+  const extraLines = rows.reduce((total, date) =>
+    total + Math.max(0, (byDate.get(date) ?? []).flatMap(timesheetParts).length - 1), 0);
+  const totalMinutes = shownShifts.reduce((sum, s) => sum + s.paidMinutes, 0);
+  const surcharges = calculateZuschlaege(shownShifts, schedule.surchargeConfig);
   const holidayNames = publicHolidayNames(schedule.year);
   const closedByDate = new Map(
     schedule.dateOverrides.filter((o) => o.closed).map((o) => [o.date, o] as const),
   );
 
   return (
-    <div className="stundenzettel-page bg-white text-slate-900 mx-auto max-w-[210mm] p-6 text-[12px]">
+    <div className={`stundenzettel-page miss-do-timesheet ${extraLines > 9 ? "miss-do-timesheet-dense" : ""} bg-white text-slate-900 mx-auto max-w-[210mm] p-6 text-[12px]`}>
       <div className="flex items-start justify-between border-b-2 border-slate-800 pb-2 mb-3">
         <div>
           <h2 className="text-xl font-bold tracking-tight">Stundenaufzeichnung</h2>
@@ -87,22 +92,15 @@ export function StundenzettelPage({
         </thead>
         <tbody>
           {rows.map((d) => {
-            const s = byDate.get(d);
+            const shifts = byDate.get(d) ?? [];
+            const parts = shifts.sort((a, b) => a.startMinutes - b.startMinutes).flatMap(timesheetParts);
             const wd = WEEKDAY_LABELS_DE[weekdayKeyOf(parseIsoDate(d))];
             const holiday = holidayNames.get(d);
             const closed = closedByDate.get(d);
             const isWeekend = wd === "Samstag" || wd === "Sonntag";
             let bemerkung: string;
-            if (s) {
-              // Zuschläge klar ausweisen: Sonntagsreinigung und der Nachtanteil
-              // (Arbeit nach 20:00 bis 23:00) stehen als Bemerkung dabei.
-              const teile: string[] = [];
-              if (holiday) teile.push(`Feiertag: ${holiday}`);
-              if (s.category === "SUNDAY") teile.push("Sonntagszuschlag (Reinigung)");
-              if (s.nightMinutes) {
-                teile.push(`Nachtzuschlag ${minutesToDecimalHours(s.nightMinutes)} h (ab 20:00)`);
-              }
-              bemerkung = teile.join(" · ");
+            if (parts.length > 0) {
+              bemerkung = holiday ? `Feiertag: ${holiday}` : "";
             } else if (closed) {
               bemerkung = closed.note || "Betriebsruhe";
             } else if (holiday) {
@@ -114,11 +112,13 @@ export function StundenzettelPage({
               <tr key={d} className={isWeekend || holiday || closed ? "bg-slate-50" : ""}>
                 <Td>{format(parseIsoDate(d), "dd.MM.yyyy")}</Td>
                 <Td>{wd}</Td>
-                <Td className="text-center">{s ? minutesToTime(s.startMinutes) : ""}</Td>
-                <Td className="text-center">{s ? minutesToTime(s.endMinutes) : ""}</Td>
-                <Td className="text-center">{s ? `${s.pauseMinutes} Min` : ""}</Td>
-                <Td className="text-center">{s ? minutesToDecimalHours(s.paidMinutes) : "0,00"}</Td>
-                <Td className="text-left text-slate-500">{bemerkung}</Td>
+                <Td className="text-center">{parts.map((p, i) => <div key={i}>{minutesToTime(p.startMinutes)}</div>)}</Td>
+                <Td className="text-center">{parts.map((p, i) => <div key={i}>{minutesToTime(p.endMinutes)}</div>)}</Td>
+                <Td className="text-center">{parts.map((p, i) => <div key={i}>{p.pauseMinutes} Min</div>)}</Td>
+                <Td className="text-center">{parts.length ? parts.map((p, i) => <div key={i}>{minutesToDecimalHours(p.paidMinutes)}</div>) : "0,00"}</Td>
+                <Td className="text-left text-slate-500">{parts.length
+                  ? parts.map((p, i) => <div key={i}>{[p.label, bemerkung].filter(Boolean).join(" · ") || "\u00a0"}</div>)
+                  : bemerkung}</Td>
               </tr>
             );
           })}
@@ -153,7 +153,22 @@ export function StundenzettelPage({
         </div>
       </div>
 
-      <div className="mt-10 grid grid-cols-3 gap-8 text-[11px]">
+      <div className="mt-3 border-t border-slate-300 pt-2 text-[11px]">
+        <div className="font-semibold mb-1">Zuschläge</div>
+        <div className="grid grid-cols-2 gap-3">
+          <div>Nachtzuschlag (Mo–Sa, ab 20:00)<br />
+            {minutesToDecimalHours(surcharges.after20Minutes)} h × {surcharges.after20Percent.toLocaleString("de-DE")}%
+            {" = +"}{minutesToDecimalHours(surcharges.after20BonusMinutes)} h
+          </div>
+          <div>Sonntagszuschlag<br />
+            {minutesToDecimalHours(surcharges.sundayMinutes)} h × {surcharges.sundayPercent.toLocaleString("de-DE")}%
+            {" = +"}{minutesToDecimalHours(surcharges.sundayBonusMinutes)} h
+          </div>
+        </div>
+        <div className="mt-1 font-semibold">Zuschlagsstunden gesamt: +{minutesToDecimalHours(surcharges.totalBonusMinutes)} h</div>
+      </div>
+
+      <div className="mt-4 grid grid-cols-3 gap-8 text-[11px]">
         <Signature label="Unterschrift Mitarbeiter" />
         <Signature label="Unterschrift Arbeitgeber" />
         <Signature label="Datum" />
@@ -208,7 +223,7 @@ function Td({
 function Signature({ label }: { label: string }) {
   return (
     <div>
-      <div className="border-t border-slate-500 pt-1 mt-8 text-slate-600">{label}</div>
+      <div className="border-t border-slate-500 pt-1 mt-4 text-slate-600">{label}</div>
     </div>
   );
 }

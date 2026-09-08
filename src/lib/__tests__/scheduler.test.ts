@@ -33,18 +33,6 @@ describe("Scheduler – Beispielbelegschaft Miss Do (September 2026)", () => {
     }
   });
 
-  it("trifft jeden Reinigungs-Topf (Nacht + Sonntag) exakt", () => {
-    for (const emp of SAMPLE_EMPLOYEES) {
-      const night = shifts
-        .filter((s) => s.employeeId === emp.id)
-        .reduce((sum, s) => sum + (s.nightMinutes ?? 0), 0);
-      const sunday = shifts
-        .filter((s) => s.employeeId === emp.id && s.category === "SUNDAY")
-        .reduce((sum, s) => sum + s.paidMinutes, 0);
-      expect(night).toBe(emp.nightMinutes ?? 0);
-      expect(sunday).toBe(emp.sundayMinutes ?? 0);
-    }
-  });
 
   it("hält alle harten Regeln ein (Validierung grün)", () => {
     const result = validateSchedule(SAMPLE_EMPLOYEES, shifts);
@@ -70,7 +58,7 @@ describe("Scheduler – Beispielbelegschaft Miss Do (September 2026)", () => {
     }
   });
 
-  it("Ladendienst 9:30–20:00; jede Schicht mit korrekter Pause", () => {
+  it("Ladendienst 9:30–22:00; jede Schicht mit korrekter Pause", () => {
     const byId = new Map(SAMPLE_EMPLOYEES.map((e) => [e.id, e] as const));
     for (const s of shifts) {
       const typ = byId.get(s.employeeId)?.employmentType;
@@ -83,23 +71,19 @@ describe("Scheduler – Beispielbelegschaft Miss Do (September 2026)", () => {
         expect(s.startMinutes).toBeGreaterThanOrEqual(9 * 60 + 30);
         expect(ladenPaid).toBeLessThanOrEqual(9 * 60);
         // Ende spätestens 20:00 – außer bei einer Abendverlängerung (bis 23:00).
-        expect(s.endMinutes).toBeLessThanOrEqual((s.nightMinutes ?? 0) > 0 ? 23 * 60 : 20 * 60);
+        expect(s.endMinutes).toBeLessThanOrEqual(22 * 60);
       }
     }
   });
 
-  it("Abendreinigung verlängert einen schließenden Dienst über 20:00 (ko ngắt ca)", () => {
-    for (const s of shifts.filter((x) => (x.nightMinutes ?? 0) > 0)) {
-      // Ein durchgehender FLOOR-Dienst, der nach 20:00 weiterläuft.
-      expect(s.category ?? "FLOOR").toBe("FLOOR");
-      expect(s.endMinutes).toBeGreaterThan(20 * 60);
-      expect(s.endMinutes).toBeLessThanOrEqual(23 * 60);
-      // Der Ladenteil endet spätestens 20:00, der Rest ist nightMinutes.
-      expect(s.endMinutes - 20 * 60).toBe(s.nightMinutes);
-      expect(new Date(`${s.date}T12:00:00Z`).getUTCDay()).not.toBe(0);
-    }
-    for (const s of shifts.filter((x) => x.category === "SUNDAY")) {
-      expect(new Date(`${s.date}T12:00:00Z`).getUTCDay()).toBe(0);
+  it("has exactly one continuous closer from 20:00 to 22:00 on every open weekday", () => {
+    const dates = new Set(shifts.filter(isFloor).map((s) => s.date));
+    for (const date of dates) {
+      const night = shifts.filter((s) => s.date === date && s.endMinutes > 1200);
+      expect(night, date).toHaveLength(1);
+      expect(night[0].startMinutes).toBeLessThan(1200);
+      expect(night[0].endMinutes).toBe(1320);
+      expect(night[0].paidMinutes).toBeLessThanOrEqual(540);
     }
   });
 

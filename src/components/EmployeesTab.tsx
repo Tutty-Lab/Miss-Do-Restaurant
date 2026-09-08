@@ -35,8 +35,6 @@ type Draft = {
   hours: string;
   availableWeekdays: WeekdayKey[]; // [] = alle Tage
   maxDaysPerWeek: string;
-  nightHours: string;
-  sundayHours: string;
 };
 
 function draftFrom(emp?: Employee): Draft {
@@ -47,8 +45,6 @@ function draftFrom(emp?: Employee): Draft {
     hours: emp ? String(emp.targetMinutes / 60) : "176",
     availableWeekdays: emp?.availableWeekdays ?? [],
     maxDaysPerWeek: emp?.maxDaysPerWeek ? String(emp.maxDaysPerWeek) : "",
-    nightHours: emp?.nightMinutes ? String(emp.nightMinutes / 60) : "",
-    sundayHours: emp?.sundayMinutes ? String(emp.sundayMinutes / 60) : "",
   };
 }
 
@@ -56,8 +52,6 @@ function draftFrom(emp?: Employee): Draft {
 function draftToEmployee(d: Draft): Omit<Employee, "id"> {
   const stunden = Math.max(0, Math.round(Number(d.hours) || 0));
   const tage = Number(d.maxDaysPerWeek);
-  const nacht = Number(d.nightHours);
-  const sonntag = Number(d.sundayHours);
   return {
     name: d.name.trim() || "Nhân viên mới",
     persNr: d.persNr.trim() || undefined,
@@ -65,8 +59,6 @@ function draftToEmployee(d: Draft): Omit<Employee, "id"> {
     targetMinutes: stunden * 60,
     availableWeekdays: d.availableWeekdays.length > 0 ? d.availableWeekdays : undefined,
     maxDaysPerWeek: d.maxDaysPerWeek === "" || tage < 1 ? undefined : Math.min(7, Math.round(tage)),
-    nightMinutes: d.nightHours === "" || nacht <= 0 ? undefined : Math.round(nacht) * 60,
-    sundayMinutes: d.sundayHours === "" || sonntag <= 0 ? undefined : Math.round(sonntag) * 60,
   };
 }
 
@@ -198,16 +190,6 @@ function EmployeeSummaryRow({ emp }: { emp: Employee }) {
         )}
         {emp.maxDaysPerWeek ? (
           <span className="text-slate-400">· {emp.maxDaysPerWeek} ngày/tuần</span>
-        ) : null}
-        {emp.nightMinutes ? (
-          <span className="rounded bg-indigo-50 text-indigo-700 px-1.5 py-0.5">
-            tối {emp.nightMinutes / 60}h
-          </span>
-        ) : null}
-        {emp.sundayMinutes ? (
-          <span className="rounded bg-amber-50 text-amber-700 px-1.5 py-0.5">
-            CN {emp.sundayMinutes / 60}h
-          </span>
         ) : null}
       </div>
     </div>
@@ -364,39 +346,6 @@ function EmployeeSheet({
             />
             <span className="text-slate-400">bỏ trống = không giới hạn</span>
           </label>
-
-          {/*
-            Reinigung als eigene Töpfe: abends nach Schluss (Nachtzuschlag, hängt
-            als Verlängerung am Schließer bis 23:00) und sonntags (Sonntagszuschlag).
-          */}
-          <div className="grid grid-cols-2 gap-3 border-t border-slate-100 pt-3">
-            <label className="block">
-              <span className="text-xs text-slate-600">Lau chùi buổi tối (tới 23h) — giờ/tháng</span>
-              <input
-                type="number"
-                inputMode="numeric"
-                min={0}
-                step={1}
-                placeholder="0"
-                value={d.nightHours}
-                onChange={(e) => set("nightHours", e.target.value)}
-                className={`${inputClass} w-full mt-1`}
-              />
-            </label>
-            <label className="block">
-              <span className="text-xs text-slate-600">Lau chùi chủ nhật — giờ/tháng</span>
-              <input
-                type="number"
-                inputMode="numeric"
-                min={0}
-                step={1}
-                placeholder="0"
-                value={d.sundayHours}
-                onChange={(e) => set("sundayHours", e.target.value)}
-                className={`${inputClass} w-full mt-1`}
-              />
-            </label>
-          </div>
         </div>
 
         <div className="sticky bottom-0 bg-white border-t border-slate-200 px-4 py-3">

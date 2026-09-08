@@ -71,16 +71,20 @@ export function longestBlock(blocks: DayBlocks): number {
 
 const w = (start: number, end: number): DayWindow => ({ startMinutes: start, endMinutes: end });
 
-// Vorgabe des Betriebs (Miss Do), Arbeitszeit:
-//   Montag–Samstag  9:30–20:00  (ein Block, durchgehend)
+// Vorgabe des Betriebs (Miss Do), Arbeitszeit (giờ xếp ca, NICHT Öffnungszeit):
+//   Montag–Samstag  9:30–22:00  (ein Block, durchgehend)
+//                   Bedienung bis 20:00, danach schließt EINE Kraft ab und
+//                   reinigt bis 22:00. Die Spitzen liegen mittags/nachmittags,
+//                   nach 19:00 bleibt nur der Schließer – deshalb steht abends
+//                   genau einer bis 22:00. Die Minuten nach 20:00 sind der
+//                   Nachtzuschlag (lib/zuschlaege), zählen aber als normale
+//                   bezahlte Zeit gegen das Monats-Soll.
 //   Sonntag         geschlossen – bis auf 12 verkaufsoffene Sonntage im Jahr,
-//                   die je Datum in Cài đặt geöffnet werden
+//                   die je Datum in Cài đặt geöffnet werden. Die Sonntags-
+//                   REINIGUNG (Sonntagszuschlag) ist ein eigener Dienst je
+//                   geschlossenem Sonntag – siehe scheduler.ts.
 //   Feiertag        geschlossen (Berlin; Einzelhandel hat an Feiertagen zu)
-//
-// Reinigung nach Ladenschluss (20:00–23:00, "Nachtzuschlag") und die
-// Sonntagsreinigung ("Sonntagszuschlag") sind KEINE Öffnungszeiten des Ladens,
-// sondern eigene Dienste – siehe scheduler.ts.
-const TAG: DayBlocks = [w(9 * 60 + 30, 20 * 60)];
+const TAG: DayBlocks = [w(9 * 60 + 30, 22 * 60)];
 
 export const DEFAULT_WORK_HOURS: WorkHoursConfig = {
   perWeekday: {
@@ -90,7 +94,7 @@ export const DEFAULT_WORK_HOURS: WorkHoursConfig = {
     thursday: TAG.map((b) => ({ ...b })),
     friday: TAG.map((b) => ({ ...b })),
     saturday: TAG.map((b) => ({ ...b })),
-    sunday: TAG.map((b) => ({ ...b })),
+    sunday: [w(9 * 60 + 30, 20 * 60)],
   },
   // Feiertage sind geschlossen: eine leere Liste, die resolveDay als CLOSED liest.
   holiday: [],

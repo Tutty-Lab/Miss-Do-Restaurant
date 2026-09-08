@@ -21,6 +21,8 @@ import {
 } from "../lib/openSundays";
 import { publicHolidayNames } from "../lib/holidays";
 import { isoLabel } from "../lib/shiftOps";
+import { normalizeSurchargeConfig } from "../lib/zuschlaege";
+import { DEFAULT_SUNDAY_CLEANING_MINUTES } from "../lib/scheduleDefaults";
 
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return (
@@ -74,8 +76,8 @@ function BlockRow({
     onChange(blocks.map((b, k) => (k === i ? { ...b, ...patch } : b)));
 
   return (
-    <div className="flex items-start gap-2 py-1.5">
-      <div className="w-24 sm:w-40 shrink-0 pt-1.5">
+    <div className="flex flex-wrap sm:flex-nowrap items-start gap-2 py-1.5">
+      <div className="w-full sm:w-40 shrink-0 pt-1.5">
         <div className="text-sm text-slate-700 leading-tight">{label}</div>
         {hint && <div className="text-[11px] text-slate-400">{hint}</div>}
       </div>
@@ -83,7 +85,7 @@ function BlockRow({
       {closed ? (
         <div className="flex-1 pt-1.5 text-sm font-medium text-rose-600">Đóng cửa</div>
       ) : (
-        <div className="flex-1 space-y-1">
+        <div className="min-w-0 flex-1 space-y-1">
           {blocks.map((b, i) => (
             <div key={i} className="flex items-center gap-2">
               <input
@@ -364,6 +366,7 @@ function OpenSundaysSection({
 
 export function SettingsTab({ store }: { store: UseScheduleReturn }) {
   const { schedule, updateMeta, upsertOverride, removeOverride , changePassword, hasOwnPassword } = store;
+  const surcharges = normalizeSurchargeConfig(schedule.surchargeConfig);
   const years = Array.from({ length: 7 }, (_, i) => new Date().getFullYear() - 1 + i);
 
   // ---- Ngày đặc biệt (Ausnahmen) ----
@@ -542,6 +545,51 @@ export function SettingsTab({ store }: { store: UseScheduleReturn }) {
             </ul>
           </div>
         )}
+      </section>
+
+      <section className="rounded-lg bg-white border border-slate-200 p-4 sm:p-5 shadow-sm">
+        <h2 className="text-base font-semibold text-slate-900">Phụ cấp (Zuschläge)</h2>
+        <p className="mt-1 text-xs text-slate-500">
+          Giờ sau 20h (T2–T7) và giờ Chủ nhật tính vào định mức tháng. Phụ cấp tính riêng theo %,
+          quy đổi thành giờ thưởng như Thiên Long Việt Phố; không cộng vào giờ thực làm.
+        </p>
+        <fieldset disabled={store.isLocked} className="mt-3 grid gap-3 sm:grid-cols-3 disabled:opacity-60">
+          <Field label="Nachtzuschlag (%)">
+            <input type="number" min={0} step="any" className={inputClass}
+              value={surcharges.after20Percent}
+              onChange={(e) => updateMeta({ surchargeConfig: normalizeSurchargeConfig({
+                ...surcharges, after20Percent: Number(e.target.value),
+              }) })} />
+          </Field>
+          <Field label="Sonntagszuschlag (%)">
+            <input type="number" min={0} step="any" className={inputClass}
+              value={surcharges.sundayPercent}
+              onChange={(e) => updateMeta({ surchargeConfig: normalizeSurchargeConfig({
+                ...surcharges, sundayPercent: Number(e.target.value),
+              }) })} />
+          </Field>
+          <Field label="Giờ dọn mỗi Chủ nhật">
+            <select className={inputClass}
+              value={schedule.sundayCleaningMinutes ?? DEFAULT_SUNDAY_CLEANING_MINUTES}
+              onChange={(e) => updateMeta({ sundayCleaningMinutes: Number(e.target.value) })}>
+              {Array.from({ length: 9 }, (_, hours) => (
+                <option key={hours} value={hours * 60}>{hours === 0 ? "Không xếp ca dọn CN" : `${hours} giờ`}</option>
+              ))}
+            </select>
+          </Field>
+        </fieldset>
+        <p className="mt-3 text-xs text-slate-500">
+          Mặc định 2 giờ/CN, bắt đầu 10h, một người luân phiên; chỉ xếp khi CN đóng cửa.
+          Ngày được đánh dấu nghỉ riêng sẽ không có ca dọn. Đổi giờ dọn cần tạo lại lịch.
+          T2–T7 đặt cuối khung giờ làm là 22h để có một người dọn 20–22h.
+        </p>
+        {schedule.surchargeModelVersion !== 2 && (
+          <p className="mt-2 text-xs text-amber-800">
+            Lịch hiện tại dùng định mức dọn cũ. Tạo lại lịch để áp dụng cách tính mới;
+            khung mặc định 9:30–20:00 sẽ đổi thành 9:30–22:00.
+          </p>
+        )}
+        {store.isLocked && <p className="mt-2 text-xs text-amber-800">Mở khóa tháng để sửa phụ cấp.</p>}
       </section>
 
       <OpenSundaysSection

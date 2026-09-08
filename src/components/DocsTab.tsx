@@ -79,7 +79,7 @@ export function DocsTab() {
         <ul className="list-disc pl-5 space-y-1">
           <li>Tối đa <b>9 giờ công</b> mỗi ngày cho một người.</li>
           <li>Mỗi người <b>một ca bán hàng mỗi ngày</b> (giờ lau chùi buổi tối nối luôn vào ca đó, xem dưới).</li>
-          <li>Không làm quá <b>6 ngày liên tiếp</b> (tính ca bán hàng).</li>
+          <li>Không làm quá <b>6 ngày liên tiếp</b>, tính cả ca dọn Chủ nhật.</li>
           <li>
             Mỗi người phải đạt <b>đúng định mức tháng</b> (Sollstunden) — không thừa, không thiếu.
           </li>
@@ -103,18 +103,17 @@ export function DocsTab() {
             </span>
           </li>
           <li>
-            <b>Lau chùi (Zuschlag)</b> là hai <b>quỹ giờ riêng</b>, tách khỏi định mức bán hàng,
-            đặt ở tab <b>Nhân viên</b>:
+            <b>Phụ cấp (Zuschlag)</b> tính theo % giờ thực làm, đặt ở tab <b>Cài đặt</b>.
+            Giờ dọn tính vào định mức tháng; giờ thưởng quy đổi được ghi riêng.
             <br />
             <span className="text-slate-500">
-              <b>Lau chùi buổi tối (Nachtzuschlag)</b>: input là <b>số giờ 1 tháng</b>. App
-              chọn ngày người đó đóng cửa rồi <b>làm nối tiếp qua 20:00</b> — ví dụ thêm 2 tiếng
-              thì làm tới 20:00 rồi làm thẳng tới 22:00, <b>một ca liền, không ngắt</b>. Tối đa
-              3h/ngày (tới 23:00). Phần sau 20:00 là giờ Nachtzuschlag, không tính vào định mức
-              bán hàng. Nếu không đủ ngày đóng cửa để nối cho hết thì chỉ <b>cảnh báo</b>.
+              <b>Lau chùi buổi tối (Nachtzuschlag)</b>: T2–T7 một người làm nối tiếp
+              tới 22:00, dọn 20:00–22:00. Bảng chấm công tách hai phần giờ;
+              tổng ca vẫn tối đa 9 giờ công. Phụ cấp đêm chỉ tính giờ sau 20:00 từ T2 đến T7.
               <br />
-              <b>Lau chùi chủ nhật (Sonntagszuschlag)</b>: quán đóng cửa CN nên đây là ca riêng,
-              10:00–20:00, tối đa 8h mỗi chủ nhật.
+              <b>Lau chùi Chủ nhật</b>: một người luân phiên từ 10:00, mặc định 2 giờ,
+              chỉnh 0–8 giờ trong Cài đặt. Chỉ xếp khi quán đóng cửa CN, không xếp ngày
+              nghỉ riêng. Mọi giờ làm Chủ nhật hưởng Sonntagszuschlag, không cộng thêm phụ cấp đêm.
             </span>
           </li>
         </ul>

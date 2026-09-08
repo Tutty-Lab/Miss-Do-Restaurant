@@ -1,3 +1,4 @@
+import { shiftMinutesAfter20 } from "../lib/zuschlaege";
 import type { Schedule, Shift } from "../types";
 import {
   parseIsoDate,
@@ -31,11 +32,11 @@ function ShiftCell({ shift, closed }: { shift: Shift | undefined; closed: boolea
         {minutesToShortHours(shift.paidMinutes)}
         {shift.pauseMinutes > 0 && ` · P ${shift.pauseMinutes}`}
       </div>
-      {(shift.category === "SUNDAY" || shift.nightMinutes) && (
+      {(shift.category === "SUNDAY" || shiftMinutesAfter20(shift)) && (
         <div className="text-[9px] font-medium text-slate-700 whitespace-nowrap">
           {shift.category === "SUNDAY" ? "So-Reinigung" : ""}
-          {shift.category === "SUNDAY" && shift.nightMinutes ? " · " : ""}
-          {shift.nightMinutes ? `Nacht ${minutesToShortHours(shift.nightMinutes)}` : ""}
+          {shift.category === "SUNDAY" && shiftMinutesAfter20(shift) ? " · " : ""}
+          {shiftMinutesAfter20(shift) ? `Nacht ${minutesToShortHours(shiftMinutesAfter20(shift))}` : ""}
         </div>
       )}
     </>

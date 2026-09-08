@@ -77,7 +77,7 @@ describe("Uhrzeiten eines offenen Sonntags", () => {
       ...DEFAULT_WORK_HOURS,
       perWeekday: { ...DEFAULT_WORK_HOURS.perWeekday, sunday: [] },
     };
-    expect(sundayWindowOf(config)).toEqual(sundayWindowOf(DEFAULT_WORK_HOURS));
+    expect(sundayWindowOf(config)).toEqual({ startMinutes: 570, endMinutes: 1320 });
   });
 });
 
@@ -111,6 +111,7 @@ describe("Plan an einem verkaufsoffenen Sonntag", () => {
     workHours: DEFAULT_WORK_HOURS,
     employees,
     overrides,
+    sundayCleaningMinutes: 120,
   });
 
   it("plant Ladendienste an diesem Sonntag", () => {
@@ -211,6 +212,7 @@ describe("Ganzer Monat mit offenen Sonntagen", () => {
     workHours: DEFAULT_WORK_HOURS,
     employees: SAMPLE_EMPLOYEES,
     overrides,
+    sundayCleaningMinutes: 120,
   });
 
   it("bleibt regelkonform", () => {

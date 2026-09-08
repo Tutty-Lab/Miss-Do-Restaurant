@@ -5,7 +5,7 @@ Johannisthaler Chaussee 317, 12351 Berlin. Abgeleitet aus der Glory-Duck-App
 
 **Vorgaben des Betriebs:**
 
-- **Arbeitszeit 9:30–20:00, Montag bis Samstag**, ein durchgehender Block.
+- **Arbeitszeit 9:30–22:00, Montag bis Samstag**, ein durchgehender Block.
 - **Sonntag geschlossen** – bis auf **12 verkaufsoffene Sonntage im Jahr**, die
   je Datum als Ausnahme in *Cài đặt* geöffnet werden. **Feiertage** (Berlin)
   sind geschlossen (Einzelhandel).
@@ -17,30 +17,29 @@ Johannisthaler Chaussee 317, 12351 Berlin. Abgeleitet aus der Glory-Duck-App
   "fast doppelt", also steht der Samstag in `DAY_WEIGHTS` auf **1,8**.
 - **Stoßzeiten**: mittags **11:00–14:00** und nachmittags **16:00–19:00**, an
   jedem Öffnungstag.
-- **Reinigung als eigene Töpfe (Zuschlag)**, je Person in *Nhân viên*, Eingabe
-  jeweils **Stunden pro Monat**:
-  - **Nachtzuschlag** (`nightMinutes`) – die Person arbeitet bis 20:00 und dann
-    **durchgehend weiter** (höchstens bis 23:00). Kein zweiter Dienst, keine
-    Lücke ("ko ngắt ca"): der schließende Ladendienst wird länger. Die Minuten
-    nach 20:00 sind der Nachtzuschlag und stehen als `shift.nightMinutes` am
-    Dienst. Höchstens 3 h/Tag. Reicht die Zahl der Schließtage nicht, um alles
-    unterzubringen, ist der Rest eine **Warnung**.
-  - **Sonntagszuschlag** (`sundayMinutes`) – Reinigung sonntags, ein eigener
-    Dienst (sonntags ist der Laden zu), 10:00–20:00, höchstens 8 h je Sonntag.
-  Beides zählt NICHT gegen das normale Monats-Soll (`targetMinutes`).
+- **Zuschläge nach tatsächlicher Arbeitszeit**, konfigurierbar in *Cài đặt*:
+  - **Nachtzuschlag**: bezahlte Minuten nach 20:00 (Mo–Sa) × Prozentsatz.
+    Bei Standardzeiten schließt genau eine Person pro Tag und reinigt 20:00–22:00.
+    Ihr Dienst bleibt durchgehend, die gesamte bezahlte Zeit ist höchstens 9 h.
+  - **Sonntagszuschlag**: bezahlte Sonntagsminuten × Prozentsatz, ohne zusätzlichen Nachtzuschlag.
+    Ein Reinigungsdienst je geschlossenem Sonntag ab 10:00, rotierend vergeben.
+    Dauer in *Cài đặt*: 0–8 ganze Stunden, Standard 2 h, 0 deaktiviert die Reinigung.
+    Explizite geschlossene Datums-Ausnahmen werden auch bei der Reinigung respektiert.
+  - Alle Arbeitsminuten zählen gegen das Monats-Soll. Die Zuschläge werden separat
+    als Bonusstunden ausgewiesen; Standard 0%/0%, keine vorgegebenen Lohnsätze.
+  - Gespeicherte Pläne bleiben im alten Abrechnungsmodell, bis sie neu erzeugt werden.
+    Dabei wird nur das frühere Standardfenster 9:30–20:00 auf 9:30–22:00 erweitert.
 - **Feste Arbeitstage je Person** (`availableWeekdays`) und **Höchstzahl an
   Arbeitstagen je Woche** (`maxDaysPerWeek`), beides in *Nhân viên*. Leer =
   keine Einschränkung.
-- Belegschaft laut Screenshot: **14 Personen**. Minijob-Sollstunden sind aus dem
+- Belegschaft laut Screenshot: **13 Personen**. Minijob-Sollstunden sind aus dem
   Monatslohn abgeleitet (z. B. 308 € = 21,5 h) und auf ganze Stunden gerundet –
   der Plan besteht aus Diensten in ganzen Stunden, maßgeblich ist der Euro-Betrag.
 
 > **Annahmen, die der Betrieb noch bestätigen sollte.** Die Personenzahl je
 > Stoßzeit hat der Betrieb nicht genannt – gesetzt sind **mindestens 2** ohne
-> Obergrenze (`PEAK_WINDOWS_BY_WEEKDAY`). Das Sonntags-Reinigungsfenster
-> (10:00–20:00, max 8 h) und die Vereinfachung, dass die Sechs-Tage-Regel für
-> die Reinigung nicht mitzählt, sind ebenfalls Annahmen. Jede steht an genau
-> einer Stelle im Code.
+> Obergrenze (`PEAK_WINDOWS_BY_WEEKDAY`). Reinigung am Sonntag zählt bei
+> Wochenlimits und der Sechs-Tage-Regel mit.
 
 Web-App zur **automatischen Erstellung monatlicher Dienstpläne** und **druckbarer
 deutscher Stundenzettel** für ein Restaurant / Geschäft in Deutschland.
@@ -83,7 +82,7 @@ npm run preview  # Produktions-Build lokal ansehen
 ## Bedienung
 
 1. **Einstellungen** – Firmenname, Anschrift, Monat, Jahr; **Arbeitszeit-Fenster
-   je Wochentag + Feiertag** (giờ làm; Standard: Mo–Sa 9:30–20:00, Sonntag
+   je Wochentag + Feiertag** (giờ làm; Standard: Mo–Sa 9:30–22:00, Sonntag
    geschlossen; mehrere Blöcke je Tag sind möglich).
    **Feiertage (Berlin)** werden automatisch erkannt
    und angezeigt. Unter **„Ngày đặc biệt"** lassen sich einzelne Tage
@@ -104,39 +103,28 @@ Maßgeblich ist immer der Code; die Doku-Tabellen in der App (Tab **Tài liệu*
 werden direkt aus den Konstanten gerendert und können daher nicht veralten.
 
 - Max. **9 bezahlte Stunden** pro Ladendienst, **ein Ladendienst** pro
-  Mitarbeiter und Tag (Reinigung darf zusätzlich am selben Abend stehen).
-- Höchstens **6 aufeinanderfolgende** Arbeitstage (Ladendienste).
+  Mitarbeiter und Tag; die Abend-Reinigung ist Teil desselben Dienstes.
+- Höchstens **6 aufeinanderfolgende** Arbeitstage einschließlich Sonntagsreinigung.
 - **Pause** (`calculatePause`): Stammkräfte ab 7 h = 60 Min, über 6 h = 30 Min;
   **Minijob 30 Min**. Das liegt auf/über dem ArbZG (§ 4); mehr Pause zu geben
   ist erlaubt, weniger nicht.
   Die Pause zählt **nicht** zum Soll, verlängert aber die Anwesenheit:
   `presence = paid + pause`. Eine 8-h-Schicht belegt damit 9 h und passt ins
-  Fenster 9:30–20:00 (10,5 h).
-- **Reinigung** (`scheduleZuschlag`): die Abendreinigung **verlängert einen
-  schließenden Ladendienst** über 20:00 hinaus (bis 23:00, ≤ 3 h) – ein
-  durchgehender Dienst, der Teil nach 20:00 ist `shift.nightMinutes`. Reichen
-  die Schließtage nicht, wird per `uncoveredMinutes`-Prüfung nur so umgedreht,
-  dass keine Öffnungslücke entsteht; der Rest ist eine Warnung. Die
-  Sonntagsreinigung ist ein eigener SUNDAY-Dienst (10:00–20:00, ≤ 8 h).
+  Fenster 9:30–22:00 (12,5 h).
+- **Sonntagsreinigung** wird vor der Ladenplanung in Stunden und Arbeitstagen
+  reserviert. Die Dienste werden nach den Reparaturen angehängt, damit sie nicht
+  verschoben werden. Nicht erfüllbare Sonntagsvorgaben melden einen Fehler.
+- **Stundenzettel**: getrennte Zeilen vor/nach 20:00, getrennte Zuschlagssummen.
+  Wochenzettel rechnen ausschließlich die gewählte Woche ab.
 - Schichtlängen: **3 bis 9 Stunden**.
   Etwa jede zehnte Schicht wird bewusst auf 4–5 h gekürzt
   (`SHORT_SHIFT_CHANCE`), damit die Pläne nicht mechanisch aussehen – aber nur,
   wenn der Tag keinen langen Dienst mehr für die Stoßzeit braucht.
-- **Stoßzeiten** (`PEAK_WINDOWS_BY_WEEKDAY`, je Wochentag verschieden):
-  **Fr/Sa 18:00–21:00, mindestens 2 Personen**, keine Obergrenze
-  (`KEINE_OBERGRENZE`). An den übrigen Tagen ist keine Spitze hinterlegt.
-  Geprüft wird über die **ganze Spanne**, nicht an einem einzelnen Zeitpunkt.
-  - Der Apparat für eine **Obergrenze** ist vorhanden (`peakLengthCapHours`,
-    `repairPeakExcess`) und stammt aus einer Filiale, die eine hat. Hier ist er
-    schlicht nicht scharf gestellt – nennt der Betrieb später eine Höchstzahl,
-    genügt der Wert in `PEAK_WINDOWS_BY_WEEKDAY`.
-  - Reicht die Belegschaft für die 2 Personen nicht, bleibt der Plan gültig;
-    das Dashboard weist die Tage als Warnung aus
-    (`analyzeSchedule.peakViolations`).
-- Nachfrage-Gewichte pro Wochentag (`DAY_WEIGHTS`): Montag ist der Anker mit
-  1,0, **Fr/Sa stehen auf 2,0** – der doppelte Umsatz laut Betrieb. Die Tage
-  dazwischen sind interpoliert, der **Sonntag ist geschätzt**. **Feiertage
-  zählen wie Sonntag** (Nachfrage + Zeitfenster).
+- **Stoßzeiten** (`PEAK_WINDOWS_BY_WEEKDAY`): 11:00–14:00 und 16:00–19:00,
+  jeweils mindestens zwei Personen. Mo–Sa von 20:00–22:00 genau eine Person.
+  Geprüft wird über die ganze Spanne. Nicht deckbare Zeitfenster erscheinen als
+  Warnung im Dashboard.
+- Nachfrage-Gewichte (`DAY_WEIGHTS`): Samstag 1,8; übrige Wochentage 1,0.
 - **Arbeitszeit-Fenster je Tag** (giờ làm): Früh am Fenster-Beginn, Spät am
   Fenster-Ende. Geschlossene Tage bekommen keine Schicht; an verkürzten Tagen
   werden nur passende (kurze) Schichten geplant. Reicht das nicht, um beide
@@ -160,6 +148,8 @@ src/
     workHours.ts           Öffnungs-BLÖCKE je Tag (mehrere möglich) + Overrides
     holidays.ts            Berliner Feiertage (Osterformel/Computus)
     scheduler.ts           Greedy-Scheduler, Reparaturlauf, Stoßzeiten-Layout
+    zuschlaege.ts          Zuschlagsberechnung und getrennte Druckzeilen
+    scheduleDefaults.ts    kompatibles Laden und Umstellung bei Neuerzeugung
     validation.ts          Prüfung aller Regeln
     analyze.ts             Auswertung: Stoßzeiten, Gewichtstreue, Abweichung
     storage.ts             LocalStorage

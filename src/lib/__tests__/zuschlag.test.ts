@@ -1,86 +1,97 @@
-// ============================================================================
-// Reinigung als eigene Töpfe: Abend (Nachtzuschlag, 20:00–23:00) und Sonntag
-// (Sonntagszuschlag). Der Betrieb gibt je Person ein eigenes Monats-Soll; die
-// App verteilt es und hält es getrennt vom normalen Ladensoll.
-// ============================================================================
-
 import { describe, expect, it } from "vitest";
 import { generateSchedule } from "../scheduler";
 import { validateSchedule } from "../validation";
-import { DEFAULT_WORK_HOURS } from "../workHours";
+import { DEFAULT_WORK_HOURS, resolveDay } from "../workHours";
+import { SAMPLE_EMPLOYEES } from "../sampleData";
+import { datesOfMonth, parseIsoDate, weekdayKeyOf } from "../demand";
+import { publicHolidays } from "../holidays";
+import { calculateZuschlaege, normalizeSurchargeConfig, timesheetParts } from "../zuschlaege";
 import type { Employee, Shift } from "../../types";
 
-const isFloor = (s: Shift) => (s.category ?? "FLOOR") === "FLOOR";
-
-const emp = (id: string, t: Employee["employmentType"], h: number, x: Partial<Employee> = {}): Employee => ({
-  id, name: id, employmentType: t, targetMinutes: h * 60, ...x,
+const shift = (patch: Partial<Shift> = {}): Shift => ({
+  id: "s", employeeId: "e", date: "2026-08-07", startMinutes: 780,
+  endMinutes: 1320, paidMinutes: 480, pauseMinutes: 60, shiftType: "LATE",
+  generated: true, ...patch,
 });
 
-// Eine kleine, gemischte Belegschaft mit Reinigungs-Töpfen. Die Abend-Sollwerte
-// sind so gewählt, dass sie mit dieser Besetzung noch aufgehen (genug Tage, an
-// denen ein Schließer verlängert werden kann, ohne die Öffnung leer zu lassen).
-const team = (): Employee[] => [
-  emp("a", "VOLLZEIT", 120, { nightMinutes: 20 * 60, sundayMinutes: 31 * 60 }),
-  emp("b", "TEILZEIT", 115, { nightMinutes: 24 * 60, sundayMinutes: 20 * 60 }),
-  emp("c", "TEILZEIT", 50, { sundayMinutes: 20 * 60 }),
-  emp("d", "TEILZEIT", 90),
-  emp("e", "MINIJOB", 40),
-];
-
-describe("Zuschlag – Reinigung Abend und Sonntag", () => {
-  for (const month of [8, 9, 10]) {
-    const shifts = generateSchedule({ year: 2026, month, workHours: DEFAULT_WORK_HOURS, employees: team() });
-
-    it(`tháng ${month}: floor + CN đúng giờ; đêm không vượt (thiếu thì cảnh báo)`, () => {
-      const v = validateSchedule(team(), shifts);
-      for (const e of team()) {
-        const floor = shifts.filter((s) => s.employeeId === e.id && isFloor(s)).reduce((a, s) => a + s.paidMinutes - (s.nightMinutes ?? 0), 0);
-        const night = shifts.filter((s) => s.employeeId === e.id).reduce((a, s) => a + (s.nightMinutes ?? 0), 0);
-        const sun = shifts.filter((s) => s.employeeId === e.id && s.category === "SUNDAY").reduce((a, s) => a + s.paidMinutes, 0);
-        expect(floor).toBe(e.targetMinutes); // Ladensoll immer exakt
-        expect(sun).toBe(e.sundayMinutes ?? 0); // Sonntag geht immer auf (Sonntage frei)
-        // Abendreinigung ist best effort: nie MEHR als das Soll; wird es nicht
-        // ganz getroffen, steht dazu eine Warnung.
-        expect(night).toBeLessThanOrEqual(e.nightMinutes ?? 0);
-        if ((e.nightMinutes ?? 0) > 0 && night < (e.nightMinutes ?? 0)) {
-          const w = v.errors.find((x) => x.employeeId === e.id && x.severity === "warning" && x.message.includes("buổi tối"));
-          expect(w).toBeDefined();
-        }
-      }
-    });
-
-    it(`tháng ${month}: ca tối nối liền tới 23h (ko ngắt ca), ca CN đúng vào CN`, () => {
-      for (const s of shifts.filter((x) => (x.nightMinutes ?? 0) > 0)) {
-        // Một ca FLOOR liền mạch kéo qua 20:00, phần sau là nightMinutes.
-        expect(s.category ?? "FLOOR").toBe("FLOOR");
-        expect(s.endMinutes - 20 * 60).toBe(s.nightMinutes);
-        expect(s.endMinutes).toBeLessThanOrEqual(23 * 60);
-        expect(new Date(`${s.date}T12:00:00Z`).getUTCDay()).not.toBe(0);
-      }
-      for (const s of shifts.filter((x) => x.category === "SUNDAY")) {
-        expect(new Date(`${s.date}T12:00:00Z`).getUTCDay()).toBe(0);
-      }
-    });
-
-    it(`tháng ${month}: ca floor bắt đầu >= 9:30, kết thúc <= 20:00 (hoặc 23:00 nếu có lau đêm)`, () => {
-      for (const s of shifts.filter(isFloor)) {
-        expect(s.startMinutes).toBeGreaterThanOrEqual(9 * 60 + 30);
-        expect(s.endMinutes).toBeLessThanOrEqual((s.nightMinutes ?? 0) > 0 ? 23 * 60 : 20 * 60);
-        expect(new Date(`${s.date}T12:00:00Z`).getUTCDay()).not.toBe(0);
-      }
-    });
-
-    it(`tháng ${month}: validation không có lỗi cứng`, () => {
-      const v = validateSchedule(team(), shifts);
-      expect(v.errors.filter((x) => x.severity !== "warning")).toEqual([]);
-    });
-  }
-
-  it("không đặt giờ lau chùi thì không sinh ca lau chùi", () => {
-    const shifts = generateSchedule({
-      year: 2026, month: 9, workHours: DEFAULT_WORK_HOURS,
-      employees: [emp("x", "TEILZEIT", 90), emp("y", "VOLLZEIT", 120)],
-    });
-    expect(shifts.every(isFloor)).toBe(true);
+describe("Actual-time surcharges", () => {
+  it("calculates 25% night and 50% Sunday without counting Sunday twice", () => {
+    const result = calculateZuschlaege([shift(), shift({ date: "2026-08-09" })],
+      { after20Percent: 25, sundayPercent: 50 });
+    expect(result).toMatchObject({ after20Minutes: 120, sundayMinutes: 480,
+      after20BonusMinutes: 30, sundayBonusMinutes: 240, totalBonusMinutes: 270 });
   });
+
+  it("supports one-hour nights, late starts and paid-time caps", () => {
+    expect(calculateZuschlaege([shift({ endMinutes: 1260, paidMinutes: 420 })]).after20Minutes).toBe(60);
+    expect(calculateZuschlaege([shift({ startMinutes: 1230, paidMinutes: 60, pauseMinutes: 30 })]).after20Minutes).toBe(60);
+    expect(normalizeSurchargeConfig({ after20Percent: NaN, sundayPercent: -5 })).toEqual({ after20Percent: 0, sundayPercent: 0 });
+  });
+
+  it("splits the printed night portion with no extra paid time or pause", () => {
+    expect(timesheetParts(shift())).toEqual([
+      { startMinutes: 780, endMinutes: 1200, paidMinutes: 360, pauseMinutes: 60, label: "Arbeitszeit" },
+      { startMinutes: 1200, endMinutes: 1320, paidMinutes: 120, pauseMinutes: 0, label: "Nachtzuschlag" },
+    ]);
+    for (const s of [shift(), shift({ startMinutes: 1190, paidMinutes: 100, pauseMinutes: 30 }),
+      shift({ date: "2026-08-09" }), shift({ startMinutes: 1230, paidMinutes: 60, pauseMinutes: 30 })]) {
+      const rows = timesheetParts(s);
+      expect(rows.reduce((sum, p) => sum + p.paidMinutes, 0)).toBe(s.paidMinutes);
+      expect(rows.reduce((sum, p) => sum + p.pauseMinutes, 0)).toBe(s.pauseMinutes);
+      for (const p of rows) expect(p.endMinutes - p.startMinutes - p.pauseMinutes).toBe(p.paidMinutes);
+    }
+    expect(timesheetParts(shift({ date: "2026-08-09" }))).toHaveLength(1);
+  });
+});
+
+describe.each([8, 9, 10])("Cleaning included in monthly targets, month %i", (month) => {
+  const employees: Employee[] = SAMPLE_EMPLOYEES.map((e, i) => ({ ...e,
+    ...(i === 0 ? { availableWeekdays: ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday"] as Employee["availableWeekdays"] } : {}),
+    ...(i === 1 ? { maxDaysPerWeek: 3 } : {}),
+  }));
+  const input = { year: 2026, month, workHours: DEFAULT_WORK_HOURS, employees, sundayCleaningMinutes: 120 };
+  const shifts = generateSchedule(input);
+
+  it("meets each target, pause rule, weekday/week limit and six-day rule", () => {
+    expect(validateSchedule(employees, shifts).errors).toEqual([]);
+    expect(shifts.every((s) => s.nightMinutes === undefined)).toBe(true);
+    expect(generateSchedule(input)).toEqual(shifts);
+  });
+
+  it("assigns one closer per open day and one rotating cleaner per closed Sunday", () => {
+    const holidays = publicHolidays(2026);
+    for (const date of datesOfMonth(2026, month)) {
+      const day = resolveDay(DEFAULT_WORK_HOURS, date, holidays);
+      const onDay = shifts.filter((s) => s.date === date);
+      if (!day.closed) {
+        const night = onDay.filter((s) => s.endMinutes > 1200);
+        expect(night, date).toHaveLength(1);
+        expect(night[0].endMinutes).toBe(1320);
+        expect(night[0].startMinutes).toBeLessThan(1200);
+      } else if (weekdayKeyOf(parseIsoDate(date)) === "sunday") {
+        expect(onDay, date).toHaveLength(1);
+        expect(onDay[0]).toMatchObject({ category: "SUNDAY", paidMinutes: 120, startMinutes: 600 });
+        expect(onDay[0].employeeId).not.toBe(employees[0].id);
+      } else expect(onDay).toEqual([]);
+    }
+    const cleaners = shifts.filter((s) => s.category === "SUNDAY");
+    expect(new Set(cleaners.map((s) => s.employeeId)).size).toBe(cleaners.length);
+  });
+});
+
+it("respects explicit days off and permits disabling Sunday cleaning", () => {
+  const input = { year: 2026, month: 8, workHours: DEFAULT_WORK_HOURS, employees: SAMPLE_EMPLOYEES };
+  expect(generateSchedule({ ...input, sundayCleaningMinutes: 0 }).every((s) => s.category !== "SUNDAY")).toBe(true);
+  const shifts = generateSchedule({ ...input, sundayCleaningMinutes: 120,
+    overrides: { "2026-08-09": { date: "2026-08-09", closed: true } } });
+  expect(shifts.filter((s) => s.date === "2026-08-09")).toEqual([]);
+  expect(shifts.filter((s) => s.category === "SUNDAY")).toHaveLength(4);
+});
+
+it("reports impossible/invalid Sunday cleaning instead of silently dropping it", () => {
+  const input = { year: 2026, month: 8, workHours: DEFAULT_WORK_HOURS, employees: [] };
+  expect(() => generateSchedule({ ...input, sundayCleaningMinutes: 120 })).toThrow(/Chủ nhật/);
+  for (const value of [-60, 90, 540, NaN, Infinity]) {
+    expect(() => generateSchedule({ ...input, sundayCleaningMinutes: value })).toThrow(/0 đến 8/);
+  }
 });

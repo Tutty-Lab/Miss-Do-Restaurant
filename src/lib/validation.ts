@@ -5,6 +5,8 @@
 import type { Employee, Shift } from "../types";
 import { calculatePause } from "./time";
 import { maxConsecutiveRun } from "./consecutive";
+import { mayWorkOn } from "./availability";
+import { weekStartOf } from "./weeks";
 
 export type ValidationError = {
   employeeId?: string;
@@ -39,6 +41,7 @@ const MAX_CONSECUTIVE_DAYS = 6;
 export function validateSchedule(
   employees: Employee[],
   shifts: Shift[],
+  combinedTargets = true,
 ): ValidationResult {
   const errors: ValidationError[] = [];
 
@@ -59,9 +62,8 @@ export function validateSchedule(
   for (const shift of shifts) {
     const presence = shift.endMinutes - shift.startMinutes;
     const expectedPaid = presence - shift.pauseMinutes;
-    // Der Abend-Anteil (nightMinutes) bringt keine zusätzliche Pause und zählt
-    // nicht zur 9-Stunden-Grenze des Ladendienstes ("ko ngắt ca").
-    const ladenPaid = shift.paidMinutes - (shift.nightMinutes ?? 0);
+    // Only legacy plans exempted their night extension from the paid-hour cap.
+    const ladenPaid = shift.paidMinutes - (combinedTargets ? 0 : shift.nightMinutes ?? 0);
     const expectedPause = calculatePause(
       ladenPaid,
       employeeById.get(shift.employeeId)?.employmentType,
@@ -102,8 +104,7 @@ export function validateSchedule(
   for (const emp of employees) {
     const empShifts = shiftsByEmployee.get(emp.id) ?? [];
 
-    // Ladendienste und Sonntagsreinigung sind getrennte Töpfe. Die
-    // Abendreinigung steckt als nightMinutes IN den Ladendiensten.
+    // Retain the former accounting only when displaying a saved legacy plan.
     const floorShifts = empShifts.filter((s) => (s.category ?? "FLOOR") === "FLOOR");
     const sundayShifts = empShifts.filter((s) => s.category === "SUNDAY");
 
@@ -145,14 +146,28 @@ export function validateSchedule(
         }
       }
     }
-    // Nur Ladenstunden zählen gegen das normale Monats-Soll – der Abend-Anteil
-    // (nightMinutes) wird abgezogen.
-    const assignedMinutes = floorShifts.reduce(
-      (sum, s) => sum + s.paidMinutes - (s.nightMinutes ?? 0),
+    // New plans count all work; historical plans retain their original targets.
+    const countedShifts = combinedTargets ? empShifts : floorShifts;
+    const assignedMinutes = countedShifts.reduce(
+      (sum, s) => sum + s.paidMinutes - (combinedTargets ? 0 : s.nightMinutes ?? 0),
       0,
     );
-    // Die Sechs-Tage-Regel gilt für die Ladendienste; Reinigung bleibt außen vor.
-    const maxRun = maxConsecutiveRun(floorShifts.map((s) => s.date));
+    // Include Sunday in the six-day rule for the new model.
+    const maxRun = maxConsecutiveRun(countedShifts.map((s) => s.date));
+
+    if (combinedTargets) {
+      const weeks = new Map<string, number>();
+      for (const date of new Set(empShifts.map((s) => s.date))) {
+        if (!mayWorkOn(emp, date)) errors.push({ employeeId: emp.id, date,
+          message: `${emp.name}: không được làm ngày ${date}.` });
+        const week = weekStartOf(date);
+        weeks.set(week, (weeks.get(week) ?? 0) + 1);
+      }
+      for (const [week, count] of weeks) {
+        if (emp.maxDaysPerWeek && count > emp.maxDaysPerWeek) errors.push({ employeeId: emp.id,
+          message: `${emp.name}: quá ${emp.maxDaysPerWeek} ngày làm trong tuần ${week}.` });
+      }
+    }
 
     if (assignedMinutes !== emp.targetMinutes) {
       errors.push({
@@ -171,7 +186,7 @@ export function validateSchedule(
     // wird – die Verteilung ist eine Näherung (Tagesobergrenzen, wenige Sonntage).
     const nightMin = empShifts.reduce((sum, s) => sum + (s.nightMinutes ?? 0), 0);
     const zielNight = emp.nightMinutes ?? 0;
-    if (nightMin !== zielNight) {
+    if (!combinedTargets && nightMin !== zielNight) {
       errors.push({
         employeeId: emp.id,
         severity: "warning",
@@ -180,7 +195,7 @@ export function validateSchedule(
     }
     const sundayMin = sundayShifts.reduce((sum, s) => sum + s.paidMinutes, 0);
     const zielSunday = emp.sundayMinutes ?? 0;
-    if (sundayMin !== zielSunday) {
+    if (!combinedTargets && sundayMin !== zielSunday) {
       errors.push({
         employeeId: emp.id,
         severity: "warning",

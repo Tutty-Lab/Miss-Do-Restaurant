@@ -1,5 +1,5 @@
 // ============================================================================
-// Beispieldaten: die heutige Besetzung von VietHaus, Summe = 606 bezahlte Stunden.
+// Beispieldaten: Belegschaft von Miss Do.
 // ============================================================================
 
 import type { Employee, Schedule } from "../types";
@@ -11,8 +11,8 @@ export function makeEmployee(
   name: string,
   employmentType: Employee["employmentType"],
   targetHours: number,
-  /** Optional: Reinigungsstunden (Nacht/Sonntag) und Personalnummer. */
-  extra: { nightHours?: number; sundayHours?: number; persNr?: string } = {},
+  /** Optional: Personalnummer. */
+  extra: { persNr?: string } = {},
 ): Employee {
   return {
     id,
@@ -20,8 +20,6 @@ export function makeEmployee(
     ...(extra.persNr ? { persNr: extra.persNr } : {}),
     employmentType,
     targetMinutes: targetHours * 60,
-    ...(extra.nightHours ? { nightMinutes: extra.nightHours * 60 } : {}),
-    ...(extra.sundayHours ? { sundayMinutes: extra.sundayHours * 60 } : {}),
   };
 }
 
@@ -32,21 +30,18 @@ export function makeEmployee(
  * Minijob-Sollstunden sind aus dem Monatslohn abgeleitet (z. B. 21,5 h) und
  * meist auf ganze Stunden gerundet – maßgeblich ist ohnehin der Euro-Betrag.
  *
- * nightHours = Nachtzuschlag (Reinigung 20:00–23:00), sundayHours =
- * Sonntagszuschlag (Reinigung sonntags). Beides sind eigene Töpfe neben dem
- * Monats-Soll.
  */
 export const SAMPLE_EMPLOYEES: Employee[] = [
   makeEmployee("ma-1", "Văn Diện Nguyen", "TEILZEIT", 90, { persNr: "1" }),
-  makeEmployee("ma-2", "Anh Cong Le", "TEILZEIT", 55, { sundayHours: 20, persNr: "2" }),
-  makeEmployee("ma-5", "Xuan Huan Hoang", "TEILZEIT", 76, { sundayHours: 20, persNr: "5" }),
+  makeEmployee("ma-2", "Anh Cong Le", "TEILZEIT", 55, { persNr: "2" }),
+  makeEmployee("ma-5", "Xuan Huan Hoang", "TEILZEIT", 76, { persNr: "5" }),
   makeEmployee("ma-6", "Quoc Thai Pham", "VOLLZEIT", 128, { persNr: "6" }),
-  makeEmployee("ma-7", "Thi Vo", "TEILZEIT", 50, { sundayHours: 20, persNr: "7" }),
-  makeEmployee("ma-9", "Thi Hien Nguyen", "TEILZEIT", 115, { nightHours: 55, sundayHours: 20 }),
+  makeEmployee("ma-7", "Thi Vo", "TEILZEIT", 50, { persNr: "7" }),
+  makeEmployee("ma-9", "Thi Hien Nguyen", "TEILZEIT", 115),
   makeEmployee("ma-10", "Thi Hong Anh Le", "MINIJOB", 40, { persNr: "10" }),
   makeEmployee("ma-11", "Duc Binh Nguyen", "TEILZEIT", 68, { persNr: "11" }),
   makeEmployee("ma-14", "Van Dong Vu", "TEILZEIT", 79, { persNr: "14" }),
-  makeEmployee("ma-15", "Nguyen Duy Toan", "VOLLZEIT", 120, { nightHours: 30, sundayHours: 31, persNr: "15" }),
+  makeEmployee("ma-15", "Nguyen Duy Toan", "VOLLZEIT", 120, { persNr: "15" }),
   // Vertraglich 21,5 h; der Plan rechnet in ganzen Stunden (Minijob ist ohnehin
   // euro-basiert), deshalb hier auf 22 h gerundet.
   makeEmployee("ma-16", "Van Suu Pham", "MINIJOB", 22, { persNr: "16" }),
@@ -61,6 +56,9 @@ export function createSampleSchedule(): Schedule {
     year: 2026,
     month: 8, // August
     workHours: structuredClone(DEFAULT_WORK_HOURS),
+    surchargeModelVersion: 2,
+    surchargeConfig: { after20Percent: 0, sundayPercent: 0 },
+    sundayCleaningMinutes: 120,
     dateOverrides: [],
     employees: SAMPLE_EMPLOYEES.map((e) => ({ ...e })),
     shifts: [],
