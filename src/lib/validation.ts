@@ -146,14 +146,18 @@ export function validateSchedule(
         }
       }
     }
-    // New plans count all work; historical plans retain their original targets.
+    // Historical plans retain their original accounting targets, but safety
+    // constraints always inspect every actual work date (including Sunday
+    // cleaning). Otherwise a legacy plan can appear valid while someone works
+    // seven-plus consecutive days.
     const countedShifts = combinedTargets ? empShifts : floorShifts;
+    const constraintShifts = empShifts;
     const assignedMinutes = countedShifts.reduce(
       (sum, s) => sum + s.paidMinutes - (combinedTargets ? 0 : s.nightMinutes ?? 0),
       0,
     );
     // Include Sunday in the six-day rule for the new model.
-    const maxRun = maxConsecutiveRun(countedShifts.map((s) => s.date));
+    const maxRun = maxConsecutiveRun(constraintShifts.map((s) => s.date));
 
     if (combinedTargets) {
       const weeks = new Map<string, number>();

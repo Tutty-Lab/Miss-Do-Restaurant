@@ -211,10 +211,23 @@ const NACHMITTAG: PeakWindow = {
  * Spitzen. Feiertage werden wie Sonntag behandelt (effectiveWeekdayKey), sind
  * aber ohnehin geschlossen.
  */
-const WERKTAG_SPITZEN: readonly PeakWindow[] = [
+const ABENDREINIGUNG: PeakWindow = {
+  label: "Dọn tối",
+  startMinutes: 20 * 60,
+  endMinutes: 22 * 60,
+  minStaff: 1,
+  maxStaff: 1,
+};
+
+const WERKTAG_SPITZEN: readonly PeakWindow[] = [MITTAG, NACHMITTAG, ABENDREINIGUNG];
+
+// Samstag ist der stärkste Tag: nachmittags müssen DREI Kräfte da sein statt
+// zwei. Als feste Vorgabe hier – so sichert die Platzierung/Reparatur den
+// dritten Kopf am Samstagnachmittag von selbst, ohne Nachbesserung.
+const SAMSTAG_SPITZEN: readonly PeakWindow[] = [
   MITTAG,
-  NACHMITTAG,
-  { label: "Dọn tối", startMinutes: 20 * 60, endMinutes: 22 * 60, minStaff: 1, maxStaff: 1 },
+  { ...NACHMITTAG, minStaff: 3 },
+  ABENDREINIGUNG,
 ];
 
 export const PEAK_WINDOWS_BY_WEEKDAY: Record<WeekdayKey, readonly PeakWindow[]> = {
@@ -223,7 +236,7 @@ export const PEAK_WINDOWS_BY_WEEKDAY: Record<WeekdayKey, readonly PeakWindow[]> 
   wednesday: WERKTAG_SPITZEN,
   thursday: WERKTAG_SPITZEN,
   friday: WERKTAG_SPITZEN,
-  saturday: WERKTAG_SPITZEN,
+  saturday: SAMSTAG_SPITZEN,
   sunday: [MITTAG, NACHMITTAG],
 };
 
@@ -674,7 +687,11 @@ export function chooseShiftHours(
     // es gar keinen Plan.
     if (!rng) return onPace[onPace.length - 1];
 
-    // Im Normalfall die KÜRZESTE Länge, die das Tempo noch hält.
+    // Im Normalfall eine längere Länge, die das Tempo noch hält. Die kürzeste
+    // zulässige Länge verteilt ein Monats-Soll zwar rechnerisch sauber, zwingt
+    // Teilzeitkräfte aber zu unnötig vielen einzelnen Arbeitstagen. Ein Wert
+    // nahe dem oberen Drittel hält die Zahl der Anfahrten klein und lässt die
+    // Reparaturläufe weiterhin mit kurzen Diensten fein ausgleichen.
     //
     // needHours ist bereits das Mittel, das nötig ist, um das Soll bis
     // Monatsende genau aufzubrauchen. Wer länger arbeitet als dieses Mittel,
@@ -682,7 +699,7 @@ export function chooseShiftHours(
     // mehr zur Verfügung. Bei kleinen Deputaten fällt das brutal auf: 43 h in
     // 9-h-Diensten sind nach fünf Tagen weg, in 5-h-Diensten reichen sie für
     // neun.
-    return onPace[0];
+    return onPace[Math.max(0, Math.ceil(onPace.length * 0.66) - 1)];
   };
 
   // Braucht der Tag noch einen stoßzeittauglichen Dienst, wird zuerst NUR mit
@@ -1731,6 +1748,78 @@ function balanceShiftTypes(state: SchedulerState): void {
   }
 }
 
+/**
+ * Saturday is the busiest day. After the hard peak repair has done its job,
+ * use spare overlap to move one short morning service into the afternoon. A
+ * coordinated closer swap is needed: otherwise moving a morning service to
+ * 22:00 would create two people cleaning while the old closer remains late.
+ */
+function rebalanceSaturdayAfternoon(state: SchedulerState): void {
+  for (const isoDate of state.dates) {
+    if (state.effKeyOf(isoDate) !== "saturday") continue;
+    const day = state.dayOf(isoDate);
+    if (day.closed || day.blocks.length !== 1) continue;
+
+    for (let attempt = 0; attempt < 2; attempt++) {
+      const onDay = state.shifts.filter((s) => s.date === isoDate);
+      const current = minCoverageOver(onDay, 16 * 60, 19 * 60);
+      if (current >= 3) break;
+
+      const closers = onDay.filter((s) => s.endMinutes === day.window.endMinutes);
+      if (closers.length !== 1) break;
+      const oldCloser = closers[0];
+      const oldCloserPresence = oldCloser.endMinutes - oldCloser.startMinutes;
+      const oldCloserReplacementStart =
+        day.window.endMinutes - 2 * 60 - oldCloserPresence;
+      // The former closer must still fit before the 20:00 cleaning window.
+      if (oldCloserReplacementStart < day.window.startMinutes) break;
+
+      const candidates = onDay
+        .filter((s) => s !== oldCloser)
+        .filter((s) => presenceFromPaid(s.paidMinutes) <= 8 * 60)
+        .sort((a, b) => a.paidMinutes - b.paidMinutes);
+
+      let improved = false;
+      for (const candidate of candidates) {
+        const oldCloserStart = oldCloser.startMinutes;
+        const oldCloserEnd = oldCloser.endMinutes;
+        const candidateStart = candidate.startMinutes;
+        const candidateEnd = candidate.endMinutes;
+        const candidateType = candidate.shiftType;
+        const oldLatePaid = state.dateState.get(isoDate)!.latePaid;
+
+        // Move the former closer out of the cleaning window, then make the
+        // candidate the sole 22:00 closer.
+        moveShiftTo(oldCloser, oldCloserReplacementStart);
+        if (candidate.shiftType === "LATE") {
+          moveShiftTo(candidate, day.window.endMinutes - (candidateEnd - candidateStart));
+        } else {
+          retypeShift(state, candidate, "LATE");
+        }
+
+        const now = state.shifts.filter((s) => s.date === isoDate);
+        const hasOpener = now.some((s) => s.startMinutes === day.window.startMinutes);
+        const closeCount = now.filter((s) => s.endMinutes === day.window.endMinutes).length;
+        const preservesOpenCoverage = uncoveredMinutes(now, day.blocks) === 0;
+        const preservesPeaks = peakDeficit(now, day.window, state.peaksOf(isoDate)) === 0;
+        const next = minCoverageOver(now, 16 * 60, 19 * 60);
+        if (hasOpener && closeCount === 1 && preservesOpenCoverage && preservesPeaks && next > current) {
+          improved = true;
+          break;
+        }
+
+        moveShiftTo(oldCloser, oldCloserStart);
+        oldCloser.endMinutes = oldCloserEnd;
+        candidate.startMinutes = candidateStart;
+        candidate.endMinutes = candidateEnd;
+        candidate.shiftType = candidateType;
+        state.dateState.get(isoDate)!.latePaid = oldLatePaid;
+      }
+      if (!improved) break;
+    }
+  }
+}
+
 /** Verschiebt einen Dienst auf eine neue Startzeit; Dauer bleibt gleich. */
 function moveShiftTo(shift: Shift, startMinutes: number): void {
   const presence = shift.endMinutes - shift.startMinutes;
@@ -1978,6 +2067,7 @@ function planSundayCleaning(
   employees: Employee[],
   sundays: string[],
   minutesPerSunday: number,
+  rotationOffset = 0,
 ): SundayAssignment[] {
   if (!Number.isInteger(minutesPerSunday) || minutesPerSunday < 0 ||
       minutesPerSunday > 8 * 60 || minutesPerSunday % 60 !== 0) {
@@ -1986,7 +2076,7 @@ function planSundayCleaning(
   if (minutesPerSunday === 0 || sundays.length === 0) return [];
   const remaining = new Map(employees.map((e) => [e.id, e.targetMinutes]));
   const assignments: SundayAssignment[] = [];
-  let cursor = 0;
+  let cursor = employees.length > 0 ? rotationOffset % employees.length : 0;
   for (const date of sundays) {
     let assigned = false;
     for (let offset = 0; offset < employees.length; offset++) {
@@ -2004,6 +2094,29 @@ function planSundayCleaning(
     if (!assigned) throw new Error(`Không đủ nhân viên được làm Chủ nhật hoặc giờ định mức để dọn ngày ${date}.`);
   }
   return assignments;
+}
+
+/**
+ * Continue Sunday rotation across independently generated months. The UI
+ * generates one month at a time, so the calendar itself supplies the offset.
+ */
+function sundayRotationOffset(
+  year: number,
+  month: number,
+  dayOf: (isoDate: string) => ResolvedDay,
+  overrides: OverrideMap,
+): number {
+  let count = 0;
+  for (let m = 1; m < month; m++) {
+    for (const date of datesOfMonth(year, m)) {
+      if (
+        weekdayKeyOf(parseIsoDate(date)) === "sunday" &&
+        dayOf(date).closed &&
+        !overrides[date]?.closed
+      ) count++;
+    }
+  }
+  return count;
 }
 
 /**
@@ -2066,6 +2179,7 @@ export function generateSchedule(input: GenerateInput): Shift[] {
     employees,
     closedSundays,
     input.sundayCleaningMinutes ?? 0,
+    sundayRotationOffset(year, month, dayOf, overrides),
   );
   const sundayReservedTotal = sundayPlan.reduce((s, a) => s + a.paid, 0);
   // Für die Tages-Sollverteilung zählt nur der LADEN-Anteil: die Sonntagsstunden
@@ -2177,6 +2291,9 @@ export function generateSchedule(input: GenerateInput): Shift[] {
   // ... und der umgekehrte Fall: zu viele Leute in der Stoßzeit.
   repairPeakExcess(state, employeesById);
   balanceShiftTypes(state);
+  // Move available Saturday overlap into the afternoon wave after the type
+  // balancer, which may otherwise reset the coordinated closer swap.
+  rebalanceSaturdayAfternoon(state);
 
   addSundayCleaningShifts(state, sundayPlan);
 
