@@ -202,17 +202,20 @@ export function useSchedule() {
 
   // ----- Firma / Monat / Öffnungszeiten -----
   const updateMeta = useCallback((patch: Partial<Schedule>) => {
-    setSchedule((s) => {
-      // Ein Monatswechsel beginnt einen neuen Plan: die Sperre des alten
-      // Monats darf nicht mitwandern.
-      const monthChanged =
-        (patch.year !== undefined && patch.year !== s.year) ||
-        (patch.month !== undefined && patch.month !== s.month);
-      if (monthChanged) {
-        return { ...s, ...patch, lockedAt: undefined, printedWeeks: [] };
-      }
-      return { ...s, ...patch };
-    });
+    const cur = latest.current.schedule;
+    // Ein Monatswechsel beginnt einen NEUEN Plan: die alten Schichten gehören zum
+    // vorherigen Monat und müssen weg – sonst zeigt das Raster des neuen Monats
+    // lauter „Nghỉ" (die Datumsangaben passen nicht mehr), während die Summen die
+    // alten Schichten noch mitzählen. Auch Sperre/„gedruckt" wandern nicht mit.
+    const monthChanged =
+      (patch.year !== undefined && patch.year !== cur.year) ||
+      (patch.month !== undefined && patch.month !== cur.month);
+    setSchedule((s) =>
+      monthChanged
+        ? { ...s, ...patch, shifts: [], lockedAt: undefined, printedWeeks: [] }
+        : { ...s, ...patch },
+    );
+    if (monthChanged) setOriginalShifts([]);
   }, []);
 
   /**

@@ -5,7 +5,7 @@ import type { Schedule } from "../../types";
 
 it("preserves legacy shifts, employee targets and print locks on load", () => {
   const old: Schedule = {
-    ...emptySchedule(), surchargeModelVersion: undefined, surchargeConfig: undefined,
+    ...emptySchedule(), year: 2026, month: 8, surchargeModelVersion: undefined, surchargeConfig: undefined,
     lockedAt: "2026-09-01T12:00:00Z", printedWeeks: ["2026-08-03"],
     employees: [{ id: "e", name: "Legacy", employmentType: "TEILZEIT", targetMinutes: 480, nightMinutes: 120 }],
     shifts: [{ id: "s", employeeId: "e", date: "2026-08-07", startMinutes: 660, endMinutes: 1320,
@@ -36,4 +36,14 @@ it("retains custom work hours and configured surcharge settings after reload", (
   expect(workHoursForGeneration(loaded).perWeekday.friday[0].endMinutes).toBe(1260);
   loaded.surchargeModelVersion = 1;
   expect(workHoursForGeneration(loaded).perWeekday.friday[0].endMinutes).toBe(1260);
+});
+
+it("drops shifts that belong to a DIFFERENT month than the schedule (stale data)", () => {
+  const shift = (date: string) => ({ id: date, employeeId: "e", date, startMinutes: 600,
+    endMinutes: 900, paidMinutes: 300, pauseMinutes: 0, generated: true, shiftType: "EARLY" as const });
+  const raw = { ...emptySchedule(), year: 2026, month: 9,
+    shifts: [shift("2026-09-05"), shift("2026-08-31"), shift("2026-10-01")] };
+  const loaded = normalizeSchedule(raw);
+  // Chỉ giữ ca của tháng 9; ca tháng 8 và 10 bị loại (auto-heal khi đổi tháng).
+  expect(loaded.shifts.map((s) => s.date)).toEqual(["2026-09-05"]);
 });

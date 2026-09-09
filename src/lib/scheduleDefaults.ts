@@ -25,18 +25,27 @@ export function emptySchedule(): Schedule {
 export function normalizeSchedule(raw?: Schedule): Schedule {
   const base = emptySchedule();
   if (!raw) return base;
+  const year = raw.year ?? base.year;
+  const month = raw.month ?? base.month;
+  // Nur Schichten des ANGEZEIGTEN Monats behalten. Ältere Stände (Monat gewechselt
+  // ohne neu zu erzeugen) hatten sonst Schichten fremder Monate im Speicher: das
+  // Raster zeigte lauter „Nghỉ", die Summen zählten die alten Schichten aber mit.
+  const ym = `${year}-${String(month).padStart(2, "0")}-`;
+  const shifts = (Array.isArray(raw.shifts) ? raw.shifts : []).filter(
+    (s) => typeof s.date === "string" && s.date.startsWith(ym),
+  );
   return {
     ...raw,
     companyName: COMPANY_NAME,
     address: COMPANY_ADDRESS,
-    year: raw.year ?? base.year,
-    month: raw.month ?? base.month,
+    year,
+    month,
     workHours: normalizeWorkHours(raw.workHours),
     surchargeModelVersion: raw.surchargeModelVersion ?? 1,
     surchargeConfig: normalizeSurchargeConfig(raw.surchargeConfig),
     dateOverrides: Array.isArray(raw.dateOverrides) ? raw.dateOverrides : [],
     employees: raw.employees ?? [],
-    shifts: raw.shifts ?? [],
+    shifts,
     printedWeeks: Array.isArray(raw.printedWeeks) ? raw.printedWeeks : [],
   };
 }
