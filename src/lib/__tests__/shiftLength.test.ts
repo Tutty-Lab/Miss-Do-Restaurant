@@ -3,36 +3,38 @@ import { chooseShiftHours, maxShiftHoursForWindow } from "../scheduler";
 
 describe("maxShiftHoursForWindow", () => {
   it("rechnet mit Anwesenheit inkl. Pause, nicht mit bezahlter Zeit", () => {
-    // Schichten sind jetzt höchstens 6 h und liegen damit unter der Pausenschwelle
-    // (>6 h). Anwesenheit = bezahlte Zeit: 6h=360 5h=300 4h=240 3h=180.
-    expect(maxShiftHoursForWindow(630)).toBe(6);
-    expect(maxShiftHoursForWindow(600)).toBe(6);
-    expect(maxShiftHoursForWindow(360)).toBe(6); // exakt 6 h
-    expect(maxShiftHoursForWindow(359)).toBe(5);
+    // Anwesenheit (Stammkraft-Pause): 3h=180 4h=240 5h=300 6h=360 7h=480 8h=540 9h=600.
+    expect(maxShiftHoursForWindow(630)).toBe(9); // 9 h + 60 min = 600 passt
+    expect(maxShiftHoursForWindow(600)).toBe(9);
+    expect(maxShiftHoursForWindow(599)).toBe(8);
+    expect(maxShiftHoursForWindow(540)).toBe(8);
+    expect(maxShiftHoursForWindow(539)).toBe(7);
+    expect(maxShiftHoursForWindow(480)).toBe(7);
+    expect(maxShiftHoursForWindow(479)).toBe(6);
+    expect(maxShiftHoursForWindow(360)).toBe(6); // 6 h, noch ohne Pause
     expect(maxShiftHoursForWindow(300)).toBe(5);
-    expect(maxShiftHoursForWindow(299)).toBe(4);
-    expect(maxShiftHoursForWindow(240)).toBe(4);
     expect(maxShiftHoursForWindow(3 * 60)).toBe(3);
     expect(maxShiftHoursForWindow(3 * 60 - 1)).toBe(0); // zu kurz für 3 h
   });
 });
 
-describe("chooseShiftHours – Vollzeit macht höchstens 6-Stunden-Tage", () => {
-  it("nimmt 6 h, auch wenn das Fenster mehr hergäbe", () => {
-    // Max 6 h; bei einem Fenster für 9 h bleibt es bei 6.
-    expect(chooseShiftHours(120 * 60, 9, "VOLLZEIT")).toBe(6);
-    expect(chooseShiftHours(120 * 60, 6, "VOLLZEIT")).toBe(6);
+describe("chooseShiftHours – kurz im Normalfall, lang nur bei Bedarf", () => {
+  const rng = () => 0.5; // deterministischer „Zufall" für den Normalfall
+
+  it("nimmt die KÜRZESTE Länge, die das Tempo (needHours) noch hält", () => {
+    // needHours = 4 => kürzeste on-pace Länge ist 4 (nicht länger).
+    expect(chooseShiftHours(80 * 60, 9, "TEILZEIT", 4, rng)).toBe(4);
+    // needHours = 6 => 6, obwohl das Fenster 9 h hergäbe.
+    expect(chooseShiftHours(120 * 60, 9, "VOLLZEIT", 6, rng)).toBe(6);
   });
 
-  it("weicht nur aus, wenn 6 h den Monat nicht aufgehen lässt", () => {
-    const h = chooseShiftHours(11 * 60, 9, "VOLLZEIT");
-    expect(h).toBeGreaterThan(0);
-    expect(11 - h).toBeGreaterThanOrEqual(3); // Rest bleibt planbar
+  it("geht auf LANGE Dienste (7–9 h), wenn wenige Tage + viel Soll es verlangen", () => {
+    // needHours = 8 (z. B. feste Do/Fr/Sa bei hohem Soll) => mind. 8 h.
+    expect(chooseShiftHours(96 * 60, 9, "TEILZEIT", 8, rng)).toBeGreaterThanOrEqual(8);
   });
 
   it("arbeitet an einem halben Tag eine KÜRZERE Schicht, statt frei zu haben", () => {
-    // 5 h Fenster: 6 h passen nicht, also greift auch hier der Rückfall.
-    const hours = chooseShiftHours(120 * 60, 5, "VOLLZEIT");
+    const hours = chooseShiftHours(120 * 60, 5, "VOLLZEIT", 6, rng); // Fenster nur 5 h
     expect(hours).toBeGreaterThanOrEqual(3);
     expect(hours).toBeLessThanOrEqual(5);
   });

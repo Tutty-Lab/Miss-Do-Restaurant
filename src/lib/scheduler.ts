@@ -110,10 +110,10 @@ function isWeekend(isoDate: string): boolean {
   return key === "friday" || key === "saturday";
 }
 
-const SHIFT_HOURS_DESC = [6, 5, 4, 3] as const;
+const SHIFT_HOURS_DESC = [9, 8, 7, 6, 5, 4, 3] as const;
 
-/** Längste zulässige Schicht in Stunden (bezahlt, ohne Pause). */
-const MAX_SHIFT_HOURS = 6;
+/** Gesetzliche Höchstlänge einer Schicht in Stunden (bezahlt, ohne Pause). */
+const MAX_SHIFT_HOURS = 9;
 
 /** Kürzeste zulässige Schicht in Minuten – darunter geht ein Soll nicht auf. */
 const MIN_SHIFT_MINUTES = 3 * 60;
@@ -144,8 +144,15 @@ const ALLOWED_HOURS: Record<Employee["employmentType"], readonly number[]> = {
   // (z. B. 115–128 h) die 5–6-h-Dienste, die nötig sind, um das Soll in den
   // begrenzten Tagen unterzubringen. 6 h steht daher allen offen, wird aber nur
   // bei Bedarf gewählt. Minijobs sind klein => 3–5 h reichen.
-  VOLLZEIT: [5, 6],
-  TEILZEIT: [3, 4, 5, 6],
+  // Vorgabe Miss Do: möglichst KURZE Dienste tagsüber (mehr Köpfe gleichzeitig).
+  // Die Steuerung macht chooseShiftHours: es nimmt die KÜRZESTE Länge, die das
+  // Tempo (needHours = Soll ÷ verbleibende Tage) noch hält. Wer wenig Soll hat,
+  // bekommt 3–4 h; wer viel Soll auf WENIGE Tage bringen muss (feste Wochentage
+  // wie „nur Do/Fr/Sa" bei hohem Soll), bekommt automatisch die längeren 7–9-h-
+  // Dienste, die nötig sind, damit der Monat aufgeht. Lange Dienste sind also
+  // erlaubt, werden aber nur bei Bedarf gewählt – der Normalfall bleibt kurz.
+  VOLLZEIT: [5, 6, 7, 8, 9],
+  TEILZEIT: [3, 4, 5, 6, 7, 8, 9],
   MINIJOB: [3, 4, 5],
 };
 
