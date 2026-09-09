@@ -1038,7 +1038,12 @@ function placeOneShift(state: SchedulerState, employee: Employee): boolean {
     // NICHT auf 5–6 h gezwungen, sondern höchstens knapp über ihr Tempo; das
     // Rückgrat deckt dann eine Kraft mit mehr Soll (oder die Peak-Reparatur). So
     // stehen tagsüber mehr Köpfe mit kurzen Diensten gleichzeitig da.
-    const stillNeedsLong = Math.min(rawNeedsLong, needHours + 2);
+    // Vollzeit soll die Stunden auf MÖGLICHST VIELE Tage verteilen (5–6 h statt
+    // wenige lange Tage) – daher wird sie NICHT über ihr Tempo hinaus in die
+    // langen Rückgrat-Dienste gezwungen. Teilzeit/Minijob dürfen etwas darüber,
+    // damit das Rückgrat (Öffnen/Schließen) trotzdem gedeckt ist.
+    const slack = employee.employmentType === "VOLLZEIT" ? 0 : 2;
+    const stillNeedsLong = Math.min(rawNeedsLong, needHours + slack);
 
     const laenge = (cap: number) =>
       cap < 3

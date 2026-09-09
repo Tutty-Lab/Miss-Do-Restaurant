@@ -65,11 +65,13 @@ const AUGUST: Employee[] = VOLL.filter((e) => e.id !== "ma-14");
 
 export const SEED_MONTHS: SeedMonth[] = [
   { year: 2026, month: 6, label: "Juni 2026", employees: VOLL.map((e) => ({ ...e })) },
-  // Juli: Urlaubsmonat, zwei Teilzeitkräfte fehlen. Mit den dichten Spitzen
-  // (mittags & abends je 3 Köpfe) reicht die dünne Besetzung nicht überall –
-  // an einigen Tagen bleibt eine Spitze unterbesetzt (bekannter Engpass, kein
-  // Planungsfehler; das Dashboard weist diese Tage aus).
-  { year: 2026, month: 7, label: "Juli 2026", employees: JULI.map((e) => ({ ...e })), maxPeakGaps: 12 },
+  // Juli: Urlaubsmonat, zwei Teilzeitkräfte fehlen. Weil Vollzeit die Stunden
+  // bewusst auf VIELE kurze Tage verteilt (5–6 h, statt die langen Rückgrat-
+  // Dienste zu übernehmen), reicht die dünne Besetzung an vielen Tagen nicht für
+  // die 3-Köpfe-Spitzen – ein bekannter Engpass eines mageren Monats, kein
+  // Planungsfehler; das Dashboard weist diese Tage aus. Volle Monate (z. B. 14
+  // Kräfte) decken die Spitzen dagegen komplett.
+  { year: 2026, month: 7, label: "Juli 2026", employees: JULI.map((e) => ({ ...e })), maxPeakGaps: 20 },
   { year: 2026, month: 8, label: "August 2026", employees: AUGUST.map((e) => ({ ...e })) },
 ];
 
