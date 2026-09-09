@@ -114,6 +114,28 @@ body {
     size: A4;
     margin: 0;
   }
+
+  /* Browser drucken Hintergründe standardmäßig NICHT (print-color-adjust:
+     economy). Ohne das hier fielen die Kopf-/Wochenend-/Summenzeilen weiß aus
+     und die hellen slate-300-Linien kaum sichtbar – der Ausdruck sah „ohne
+     Tabelle" aus, anders als die Bildschirm-Vorschau. exact erzwingt die
+     Flächen, das kräftigere Gitter macht die Tabelle auf Papier eindeutig. */
+  .miss-do-timesheet,
+  .miss-do-timesheet * {
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+  .miss-do-timesheet table {
+    border-collapse: collapse !important;
+  }
+  .miss-do-timesheet th,
+  .miss-do-timesheet td {
+    border: 0.6pt solid #334155 !important; /* slate-700: klares Gitter im Druck */
+  }
+  .miss-do-timesheet thead tr,
+  .miss-do-timesheet tfoot tr {
+    background: #e2e8f0 !important; /* slate-200 */
+  }
 }
 
 @media print {
