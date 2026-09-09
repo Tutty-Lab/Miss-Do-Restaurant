@@ -60,7 +60,7 @@ describe("Scheduler mit Feiertagen (Dezember 2026)", () => {
   });
 
   it("bleibt gültig und trifft jedes Ladensoll exakt", () => {
-    const result = validateSchedule(SAMPLE_EMPLOYEES, shifts);
+    const result = validateSchedule(SAMPLE_EMPLOYEES, shifts, false);
     expect(result.valid).toBe(true);
     const soll = SAMPLE_EMPLOYEES.reduce((sum, e) => sum + e.targetMinutes, 0);
     const floor = shifts.filter(isFloor).reduce((s, x) => s + x.paidMinutes - (x.nightMinutes ?? 0), 0);

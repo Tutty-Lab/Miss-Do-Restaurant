@@ -24,7 +24,7 @@ describe("Ausnahmen je Datum (Overrides)", () => {
     });
     expect(shifts.filter((s) => s.date === "2026-08-08" && isFloor(s))).toHaveLength(0);
 
-    const result = validateSchedule(SAMPLE_EMPLOYEES, shifts);
+    const result = validateSchedule(SAMPLE_EMPLOYEES, shifts, false);
     expect(result.valid).toBe(true);
     expect(floorSum(shifts)).toBe(soll);
   });
@@ -55,7 +55,7 @@ describe("Ausnahmen je Datum (Overrides)", () => {
       expect(s.startMinutes).toBeGreaterThanOrEqual(10 * 60 + 30);
       expect(s.endMinutes).toBeLessThanOrEqual(16 * 60);
     }
-    const result = validateSchedule(SAMPLE_EMPLOYEES, shifts);
+    const result = validateSchedule(SAMPLE_EMPLOYEES, shifts, false);
     expect(result.valid).toBe(true);
     expect(floorSum(shifts)).toBe(soll);
   });

@@ -72,19 +72,19 @@ export function longestBlock(blocks: DayBlocks): number {
 const w = (start: number, end: number): DayWindow => ({ startMinutes: start, endMinutes: end });
 
 // Vorgabe des Betriebs (Miss Do), Arbeitszeit (giờ xếp ca, NICHT Öffnungszeit):
-//   Montag–Samstag  9:30–22:00  (ein Block, durchgehend)
-//                   Bedienung bis 20:00, danach schließt EINE Kraft ab und
-//                   reinigt bis 22:00. Die Spitzen liegen mittags/nachmittags,
-//                   nach 19:00 bleibt nur der Schließer – deshalb steht abends
-//                   genau einer bis 22:00. Die Minuten nach 20:00 sind der
-//                   Nachtzuschlag (lib/zuschlaege), zählen aber als normale
-//                   bezahlte Zeit gegen das Monats-Soll.
+//   Montag–Samstag  9:30–20:00  (ein Block, Bedienung)
+//                   Das FLOOR-Fenster endet um 20:00. Die Abendreinigung nach
+//                   20:00 (Nachtzuschlag) liegt NICHT mehr in diesem Fenster:
+//                   sie wird je Person aus deren Monats-Topf (nightMinutes)
+//                   erzeugt und auf ein paar zufällige Tage gestreut, mit
+//                   zufälliger Länge (Ende ~21–23 Uhr) – siehe planNightWork.
 //   Sonntag         geschlossen – bis auf 12 verkaufsoffene Sonntage im Jahr,
 //                   die je Datum in Cài đặt geöffnet werden. Die Sonntags-
-//                   REINIGUNG (Sonntagszuschlag) ist ein eigener Dienst je
-//                   geschlossenem Sonntag – siehe scheduler.ts.
+//                   REINIGUNG (Sonntagszuschlag) wird je Person aus sundayMinutes
+//                   erzeugt und auf einige geschlossene Sonntage gestreut
+//                   (planSundayWork in scheduler.ts).
 //   Feiertag        geschlossen (Berlin; Einzelhandel hat an Feiertagen zu)
-const TAG: DayBlocks = [w(9 * 60 + 30, 22 * 60)];
+const TAG: DayBlocks = [w(9 * 60 + 30, 20 * 60)];
 
 export const DEFAULT_WORK_HOURS: WorkHoursConfig = {
   perWeekday: {

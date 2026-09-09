@@ -1,3 +1,4 @@
+import { useState } from "react";
 import type { UseScheduleReturn } from "../hooks/useSchedule";
 import { minutesToDecimalHours } from "../lib/time";
 
@@ -20,6 +21,7 @@ function shortDate(iso: string): string {
 
 export function Dashboard({ store }: { store: UseScheduleReturn }) {
   const { schedule, validation, peakGaps } = store;
+  const [showPeak, setShowPeak] = useState(false);
   const vz = schedule.employees.filter((e) => e.employmentType === "VOLLZEIT").length;
   const tz = schedule.employees.filter((e) => e.employmentType === "TEILZEIT").length;
   const mj = schedule.employees.filter((e) => e.employmentType === "MINIJOB").length;
@@ -65,36 +67,48 @@ export function Dashboard({ store }: { store: UseScheduleReturn }) {
         công. Nó chỉ có nghĩa là tổng giờ trong ngày quá mỏng để lúc nào cũng
         có 2 người. Trước đây chuyện này diễn ra âm thầm, không ai biết.
       */}
+      {/*
+        Giờ cao điểm thiếu người là CẢNH BÁO, không phải lỗi định mức. Chi tiết
+        được giấu sau nút (i), bấm mới hiện — để bảng tổng quan gọn.
+      */}
       {peakGaps.length > 0 && (
         <div className="mt-2 rounded bg-amber-50 border border-amber-200 text-amber-900 text-sm px-3 py-2">
-          {/*
-            Zeiten und Grenzen kommen aus PEAK_WINDOWS_BY_WEEKDAY. Sie sind je
-            Wochentag verschieden (Di–Fr mittags, Sa/So abends), deshalb steht
-            hier keine feste Uhrzeit mehr, sondern nur die Tage mit Abweichung.
-          */}
-          <div className="font-medium">
-            {peakGaps.length} ngày chưa đúng số người trong giờ cao điểm.
+          <div className="flex items-center justify-between gap-3">
+            <span className="font-medium">
+              {peakGaps.length} ngày chưa đúng số người trong giờ cao điểm.
+            </span>
+            <button
+              onClick={() => setShowPeak((v) => !v)}
+              aria-label="Chi tiết cảnh báo giờ cao điểm"
+              aria-expanded={showPeak}
+              className="shrink-0 font-bold text-rose-600 hover:text-rose-800 underline"
+            >
+              (i)
+            </button>
           </div>
-          <div className="mt-1 space-y-0.5">
-            {peakGaps.slice(0, 6).map((d) => (
-              <div key={d.date}>
-                {shortDate(d.date)}{" "}
-                {d.peaks
-                  .filter((p) => !p.ok)
-                  .map((p) =>
-                    p.minStaff < p.required
-                      ? `${p.label} thiếu: ${p.minStaff}/${p.required} người`
-                      : `${p.label} thừa: ${p.maxStaff}, tối đa ${p.allowed}`,
-                  )
-                  .join(" · ")}{" "}
-                <span className="opacity-70">({d.shiftCount} ca, {d.paidHours}h)</span>
+          {showPeak && (
+            <div className="mt-2 border-t border-black/10 pt-2">
+              <div className="space-y-0.5 max-h-48 overflow-auto">
+                {peakGaps.map((d) => (
+                  <div key={d.date}>
+                    {shortDate(d.date)}{" "}
+                    {d.peaks
+                      .filter((p) => !p.ok)
+                      .map((p) =>
+                        p.minStaff < p.required
+                          ? `${p.label} thiếu: ${p.minStaff}/${p.required} người`
+                          : `${p.label} thừa: ${p.maxStaff}, tối đa ${p.allowed}`,
+                      )
+                      .join(" · ")}{" "}
+                    <span className="opacity-70">({d.shiftCount} ca, {d.paidHours}h)</span>
+                  </div>
+                ))}
               </div>
-            ))}
-            {peakGaps.length > 6 && <div className="opacity-70">… và {peakGaps.length - 6} ngày nữa</div>}
-          </div>
-          <div className="mt-1 opacity-80">
-            Cách xử lý: tăng định mức cho nhân viên, thêm người, hoặc chấp nhận những ngày này.
-          </div>
+              <div className="mt-1 opacity-80">
+                Cách xử lý: tăng định mức cho nhân viên, thêm người, hoặc chấp nhận những ngày này.
+              </div>
+            </div>
+          )}
         </div>
       )}
     </div>

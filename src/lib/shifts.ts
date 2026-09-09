@@ -19,7 +19,7 @@ export type ShiftTemplate = {
 };
 
 /** Erlaubte Schichtlängen in Stunden (VietHaus: 3 h bis 9 h bezahlt). */
-export const SHIFT_LENGTHS = [3, 4, 5, 6, 7, 8, 9] as const;
+export const SHIFT_LENGTHS = [3, 4, 5, 6] as const;
 
 const DEFAULT_OPEN = 10 * 60; // 10:00
 const DEFAULT_CLOSE = 22 * 60; // 22:00

@@ -35,7 +35,8 @@ export type ValidationResult = {
   summaries: EmployeeSummary[];
 };
 
-const MAX_PAID_MINUTES = 9 * 60;
+/** Gesetzliche Höchstarbeitszeit je Tag (§ 3 ArbZG), bezahlt, ohne Pause. */
+export const MAX_PAID_MINUTES = 9 * 60;
 const MAX_CONSECUTIVE_DAYS = 6;
 
 export function validateSchedule(
@@ -62,10 +63,13 @@ export function validateSchedule(
   for (const shift of shifts) {
     const presence = shift.endMinutes - shift.startMinutes;
     const expectedPaid = presence - shift.pauseMinutes;
-    // Only legacy plans exempted their night extension from the paid-hour cap.
+    // Only legacy plans exempted their night extension from the paid-hour CAP
+    // (die 9-h-Grenze gilt nur für den Ladenteil). Die PAUSE dagegen richtet sich
+    // nach der GESAMTEN bezahlten Zeit: wer inkl. Abendreinigung über 6 h kommt,
+    // braucht die gesetzliche Pause – sonst stünde ein 10-h-Dienst ohne Pause da.
     const ladenPaid = shift.paidMinutes - (combinedTargets ? 0 : shift.nightMinutes ?? 0);
     const expectedPause = calculatePause(
-      ladenPaid,
+      shift.paidMinutes,
       employeeById.get(shift.employeeId)?.employmentType,
     );
 

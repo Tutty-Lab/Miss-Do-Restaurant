@@ -27,6 +27,7 @@ import {
 } from "./demand";
 import { getShiftTemplate, type TemplateType } from "./shifts";
 import { consecutiveRunLengthWith, seededRandom } from "./consecutive";
+import { MAX_PAID_MINUTES } from "./validation";
 import { mayWorkOn } from "./availability";
 import { weekStartOf } from "./weeks";
 import { calculatePause, presenceFromPaid } from "./time";
@@ -53,11 +54,6 @@ export type GenerateInput = {
   employees: Employee[];
   /** Feiertage als ISO-Set; Standard: Sachsen-Feiertage des Jahres. */
   holidays?: Set<string>;
-  /**
-   * Bezahlte Reinigungsminuten je geschlossenem Sonntag (ein Dienst pro Sonntag,
-   * reihum vergeben). 0/fehlt = keine Sonntagsreinigung.
-   */
-  sundayCleaningMinutes?: number;
   /** Optionaler Seed; sonst aus Eingabedaten abgeleitet. */
   seed?: string;
 };
@@ -87,6 +83,8 @@ type SchedulerState = {
   rng: () => number;
   /** true = Schichtlängen mischen; false = immer die längste (Rückfallmodus). */
   varyLengths: boolean;
+  /** Vor der Platzierung reservierte Sonntagsreinigungen (angehängt nach Reparaturen). */
+  sundayPlan: SundayAssignment[];
 };
 
 /**
@@ -112,10 +110,10 @@ function isWeekend(isoDate: string): boolean {
   return key === "friday" || key === "saturday";
 }
 
-const SHIFT_HOURS_DESC = [9, 8, 7, 6, 5, 4, 3] as const;
+const SHIFT_HOURS_DESC = [6, 5, 4, 3] as const;
 
 /** Längste zulässige Schicht in Stunden (bezahlt, ohne Pause). */
-const MAX_SHIFT_HOURS = 9;
+const MAX_SHIFT_HOURS = 6;
 
 /** Kürzeste zulässige Schicht in Minuten – darunter geht ein Soll nicht auf. */
 const MIN_SHIFT_MINUTES = 3 * 60;
@@ -139,11 +137,16 @@ const ALLOWED_HOURS: Record<Employee["employmentType"], readonly number[]> = {
   // exakt 20 Dienste zu 8 h. Sollte ein Soll einmal NICHT durch 8 teilbar
   // sein, greift in chooseShiftHours der Rückfall auf ALL_HOURS – lieber eine
   // krumme Schicht als ein Monat, der nicht aufgeht.
-  VOLLZEIT: [8],
-  TEILZEIT: [3, 4, 5, 6, 7, 8, 9],
-  // Minijob ist arbeitsrechtlich eine Form der Teilzeit – gleiche Längen.
-  // Begrenzt wird er über das Monats-Soll, nicht über die Schichtlänge.
-  MINIJOB: [3, 4, 5, 6, 7, 8, 9],
+  // Vorgabe Miss Do: möglichst KURZE Dienste, damit tagsüber viele Köpfe
+  // gleichzeitig da sind (Küche + Bedienung). Die eigentliche Steuerung macht
+  // chooseShiftHours: es nimmt die KÜRZESTE Länge, die das Tempo (needHours) noch
+  // hält. Eine Kraft mit wenig Soll bekommt so 3–4-h-Dienste, eine mit viel Soll
+  // (z. B. 115–128 h) die 5–6-h-Dienste, die nötig sind, um das Soll in den
+  // begrenzten Tagen unterzubringen. 6 h steht daher allen offen, wird aber nur
+  // bei Bedarf gewählt. Minijobs sind klein => 3–5 h reichen.
+  VOLLZEIT: [5, 6],
+  TEILZEIT: [3, 4, 5, 6],
+  MINIJOB: [3, 4, 5],
 };
 
 /**
@@ -160,7 +163,7 @@ const SHORT_SHIFT_CHANCE = 0.1;
 const SHORT_SHIFT_HOURS: readonly number[] = [4, 5];
 
 /** Alle überhaupt zulässigen Längen – Rückfall, wenn das Fenster eng ist. */
-const ALL_HOURS: readonly number[] = [3, 4, 5, 6, 7, 8, 9];
+const ALL_HOURS: readonly number[] = [3, 4, 5, 6];
 
 // ── Stoßzeiten (peak windows) ───────────────────────────────────────────────
 // Angabe des Betriebs: Spitzen mittags 11:00-14:00 und nachmittags 16:00-19:00.
@@ -189,46 +192,49 @@ export type PeakWindow = {
  */
 export const KEINE_OBERGRENZE = 99;
 
-const MITTAG: PeakWindow = {
-  label: "Trưa",
-  startMinutes: 11 * 60,
-  endMinutes: 14 * 60,
+// Vorgabe Miss Do: durchgehend mindestens ZWEI Köpfe (Küche + Bedienung) von der
+// Öffnung bis zum Ende der Bedienung, plus DREI zum Schluss.
+const GRUNDBESETZUNG: PeakWindow = {
+  label: "Cả ngày",
+  startMinutes: 9 * 60 + 30, // 9:30 (Öffnung)
+  endMinutes: 20 * 60, // 20:00 (Ende Bedienung)
   minStaff: 2,
   maxStaff: KEINE_OBERGRENZE,
 };
 
-const NACHMITTAG: PeakWindow = {
-  label: "Chiều",
-  startMinutes: 16 * 60,
-  endMinutes: 19 * 60,
-  minStaff: 2,
+// Stoßzeiten (giờ cao điểm) laut Betrieb: mittags 11–13 Uhr und abends 18–20 Uhr.
+// Dann sind DREI Köpfe nötig; das Abendfenster deckt zugleich den "immer 3 zum
+// Schluss"-Wunsch ab.
+const MITTAGSSPITZE: PeakWindow = {
+  label: "Trưa",
+  startMinutes: 11 * 60, // 11:00
+  endMinutes: 13 * 60, // 13:00
+  minStaff: 3,
+  maxStaff: KEINE_OBERGRENZE,
+};
+
+const ABENDSPITZE: PeakWindow = {
+  label: "Tối",
+  startMinutes: 18 * 60, // 18:00
+  endMinutes: 20 * 60, // 20:00
+  minStaff: 3,
   maxStaff: KEINE_OBERGRENZE,
 };
 
 /**
- * Stoßzeiten je Wochentag: beide Spitzen an jedem Werktag (Mo-Sa). Sonntag ist
- * normal geschlossen; an einem verkaufsoffenen Sonntag greifen dieselben zwei
- * Spitzen. Feiertage werden wie Sonntag behandelt (effectiveWeekdayKey), sind
- * aber ohnehin geschlossen.
+ * Stoßzeiten je Wochentag. Grundlast Cả ngày (9:30–20:00, mind. 2) an jedem
+ * offenen Tag, dazu die beiden Spitzen 11–13 und 18–20 Uhr mit mind. 3. Sonntag
+ * ist normal geschlossen; an einem verkaufsoffenen Sonntag gilt nur die Grundlast.
+ * Feiertage zählen wie Sonntag, sind aber ohnehin zu.
+ *
+ * Die Abendreinigung nach 20:00 ist KEINE Stoßzeit mehr: sie wird je Person aus
+ * nightMinutes erzeugt (planNightWork) und hinten angehängt.
  */
-const ABENDREINIGUNG: PeakWindow = {
-  label: "Dọn tối",
-  startMinutes: 20 * 60,
-  endMinutes: 22 * 60,
-  minStaff: 1,
-  maxStaff: 1,
-};
+const WERKTAG_SPITZEN: readonly PeakWindow[] = [GRUNDBESETZUNG, MITTAGSSPITZE, ABENDSPITZE];
 
-const WERKTAG_SPITZEN: readonly PeakWindow[] = [MITTAG, NACHMITTAG, ABENDREINIGUNG];
-
-// Samstag ist der stärkste Tag: nachmittags müssen DREI Kräfte da sein statt
-// zwei. Als feste Vorgabe hier – so sichert die Platzierung/Reparatur den
-// dritten Kopf am Samstagnachmittag von selbst, ohne Nachbesserung.
-const SAMSTAG_SPITZEN: readonly PeakWindow[] = [
-  MITTAG,
-  { ...NACHMITTAG, minStaff: 3 },
-  ABENDREINIGUNG,
-];
+// Samstag ist der stärkste Tag (DAY_WEIGHTS 1,8) – gleiche Spitzenvorgabe, die
+// höhere Nachfrage bringt die Gewichtung von selbst.
+const SAMSTAG_SPITZEN: readonly PeakWindow[] = WERKTAG_SPITZEN;
 
 export const PEAK_WINDOWS_BY_WEEKDAY: Record<WeekdayKey, readonly PeakWindow[]> = {
   monday: WERKTAG_SPITZEN,
@@ -237,7 +243,8 @@ export const PEAK_WINDOWS_BY_WEEKDAY: Record<WeekdayKey, readonly PeakWindow[]> 
   thursday: WERKTAG_SPITZEN,
   friday: WERKTAG_SPITZEN,
   saturday: SAMSTAG_SPITZEN,
-  sunday: [MITTAG, NACHMITTAG],
+  // Verkaufsoffener Sonntag: nur Grundlast, kein eigener Schluss-Peak.
+  sunday: [GRUNDBESETZUNG],
 };
 
 /** Wie viele Leute sind zum Zeitpunkt `t` anwesend (Anwesenheit inkl. Pause)? */
@@ -412,7 +419,7 @@ export function cheapestPeakCover(blocks: DayBlocks, peaks: readonly PeakWindow[
   for (const streng of [true, false]) {
     if (found.length > 0) break;
   // Nach Anzahl der Dienste aufsteigend, innerhalb nach Gesamtstunden.
-  for (let count = 1; count <= 4 && found.length === 0; count++) {
+  for (let count = 1; count <= 6 && found.length === 0; count++) {
     let bestTotal = Number.POSITIVE_INFINITY;
     let best: number[] | null = null;
     const combo: number[] = [];
@@ -687,19 +694,13 @@ export function chooseShiftHours(
     // es gar keinen Plan.
     if (!rng) return onPace[onPace.length - 1];
 
-    // Im Normalfall eine längere Länge, die das Tempo noch hält. Die kürzeste
-    // zulässige Länge verteilt ein Monats-Soll zwar rechnerisch sauber, zwingt
-    // Teilzeitkräfte aber zu unnötig vielen einzelnen Arbeitstagen. Ein Wert
-    // nahe dem oberen Drittel hält die Zahl der Anfahrten klein und lässt die
-    // Reparaturläufe weiterhin mit kurzen Diensten fein ausgleichen.
-    //
-    // needHours ist bereits das Mittel, das nötig ist, um das Soll bis
-    // Monatsende genau aufzubrauchen. Wer länger arbeitet als dieses Mittel,
-    // ist vorzeitig fertig – und steht dem Laden die restlichen Tage nicht
-    // mehr zur Verfügung. Bei kleinen Deputaten fällt das brutal auf: 43 h in
-    // 9-h-Diensten sind nach fünf Tagen weg, in 5-h-Diensten reichen sie für
-    // neun.
-    return onPace[Math.max(0, Math.ceil(onPace.length * 0.66) - 1)];
+    // Vorgabe Miss Do: möglichst KURZE Dienste, damit tagsüber viele Köpfe
+    // gleichzeitig da sind. Wir nehmen die KÜRZESTE Länge, die das Tempo noch
+    // hält (>= needHours). Wer viel Soll und wenig Tage hat, dessen needHours ist
+    // hoch, sodass onPace ohnehin nur lange Längen enthält – der bekommt
+    // automatisch lange Dienste und bleibt planbar. Wer gut liegt, arbeitet kurz
+    // und dafür an mehr Tagen (mehr Besetzung je Tag).
+    return onPace[0];
   };
 
   // Braucht der Tag noch einen stoßzeittauglichen Dienst, wird zuerst NUR mit
@@ -734,7 +735,13 @@ export function chooseShiftHours(
 
 /** Stabile Basisordnung: Vollzeit zuerst, dann nach Id. */
 function orderedEmployees(employees: Employee[]): Employee[] {
+  // Nach Monats-Soll ABSTEIGEND: Wer viel Soll hat, wird zuerst platziert und
+  // übernimmt die langen „Rückgrat"-Dienste des Tages (Öffnen/Schließen, die
+  // wegen des 10,5-h-Fensters 5–6 h lang sein müssen). Kräfte mit wenig Soll
+  // kommen später, finden das Rückgrat schon gedeckt und bekommen kurze
+  // 3–4-h-Dienste – so sind tagsüber mehr Köpfe gleichzeitig da.
   return [...employees].sort((a, b) => {
+    if (b.targetMinutes !== a.targetMinutes) return b.targetMinutes - a.targetMinutes;
     if (a.employmentType !== b.employmentType) {
       return a.employmentType === "VOLLZEIT" ? -1 : 1;
     }
@@ -745,7 +752,7 @@ function orderedEmployees(employees: Employee[]): Employee[] {
 function chooseTemplateType(
   state: SchedulerState,
   isoDate: string,
-  employmentType: Employee["employmentType"],
+  employee: Employee,
 ): TemplateType {
   const ds = state.dateState.get(isoDate)!;
   const effKey = state.effKeyOf(isoDate);
@@ -756,7 +763,12 @@ function chooseTemplateType(
   // auf 0,95 hochgezwungen – damit stand am Sonntag praktisch niemand zur
   // Öffnung um 11:00 im Laden. Jetzt gilt die konfigurierte Quote.
   let threshold = desired;
-  if (employmentType !== "VOLLZEIT") threshold += 0.15;
+  if (employee.employmentType !== "VOLLZEIT") threshold += 0.15;
+  // Wer Abendreinigung macht (nightMinutes), bekommt bevorzugt SPÄT-/Schließer-
+  // dienste (Ende 20:00), damit planNightWork sie nach hinten verlängern kann und
+  // die Abendstunden aufgehen – ein grosser Aufschlag drückt sie fast immer nach
+  // hinten (die anderen Kräfte übernehmen dann das Öffnen).
+  if ((employee.nightMinutes ?? 0) > 0) threshold += 0.6;
 
   return currentLateRatio < threshold ? "LATE" : "EARLY";
 }
@@ -833,7 +845,7 @@ function makeShift(
   /** Erzwingt einen bestimmten Öffnungsblock (siehe uncoveredPeakBlock). */
   forceBlock?: DayWindow,
 ): Shift {
-  const type = chooseTemplateType(state, isoDate, employee.employmentType);
+  const type = chooseTemplateType(state, isoDate, employee);
   const block =
     forceBlock ??
     blockForShift(state.dayOf(isoDate).blocks, presenceFromPaid(paidMinutes), type);
@@ -1010,9 +1022,16 @@ function placeOneShift(state: SchedulerState, employee: Employee): boolean {
     const coverHours = cheapestPeakCover(day.blocks, state.peaksOf(isoDate)).reduce((sum, h) => sum + h, 0);
     const dayTargetHours = state.rawTarget.get(isoDate)! / 60;
     const affordsCover = coverHours > 0 && dayTargetHours >= coverHours - 0.5;
-    const stillNeedsLong = affordsCover
+    const rawNeedsLong = affordsCover
       ? Math.min(missingCoverHours(state, isoDate), maxHours)
       : 0;
+    // Die langen „Rückgrat"-Dienste (Öffnen/Schließen, 5–6 h) bekommt, wer sein
+    // Monats-Soll ohnehin in langen Diensten unterbringen muss – gemessen an
+    // needHours (Soll ÷ verbleibende Tage). Eine Kraft mit wenig Soll wird hier
+    // NICHT auf 5–6 h gezwungen, sondern höchstens knapp über ihr Tempo; das
+    // Rückgrat deckt dann eine Kraft mit mehr Soll (oder die Peak-Reparatur). So
+    // stehen tagsüber mehr Köpfe mit kurzen Diensten gleichzeitig da.
+    const stillNeedsLong = Math.min(rawNeedsLong, needHours + 2);
 
     const laenge = (cap: number) =>
       cap < 3
@@ -2052,90 +2071,126 @@ function buildUnmetMessage(
   );
 }
 
-// Sunday work is reserved before floor placement, appended after repairs.
-const SUNDAY_CLEAN_START = 10 * 60; // Sonntagsreinigung beginnt um 10:00
+// ============================================================================
+// Abend- und Sonntagsarbeit: je Person ein eigener Monats-Topf, ZUSÄTZLICH zum
+// Tages-Soll (targetMinutes). Läuft NACH Platzierung + Reparaturen und hängt
+// eigene Minuten an; das Tages-Soll bleibt davon unberührt. Die Summe wird auf
+// ein paar zufällige Tage gestreut, jede Reinigung mit zufälliger Länge –
+// deterministisch über den geseedeten RNG des Laufs.
+// ============================================================================
 
+const SUNDAY_CLEAN_START = 10 * 60; // Sonntagsreinigung beginnt um 10:00
+const NIGHT_START = 20 * 60; // Abendreinigung beginnt um 20:00
+
+/** Fisher-Yates mit geseedetem RNG (Original bleibt unberührt). */
+function shuffled<T>(arr: readonly T[], rng: () => number): T[] {
+  const a = [...arr];
+  for (let i = a.length - 1; i > 0; i--) {
+    const j = Math.floor(rng() * (i + 1));
+    [a[i], a[j]] = [a[j], a[i]];
+  }
+  return a;
+}
+
+/** Höchstlänge einer Reinigung (Stunden). Sonntag muss unter der 9h-Regel bleiben. */
+// Sonntagsreinigung darf so lang sein wie gesetzlich erlaubt (kein 6-h-Deckel wie
+// tagsüber) – so passt ein größerer Monatswert auf wenige Sonntage. Länge wird mit
+// Pause gerechnet (calculatePause), nicht hart auf 8/9 h gesetzt.
+const SUNDAY_MAX_HOURS = MAX_PAID_MINUTES / 60; // = gesetzliche Tageshöchstzeit
+/** Abend: HARTE Höchstlänge je Abend = 5 h => Ende spätestens 1 Uhr nachts
+ *  (20:00 + 5 h). Nie länger – ein 15-h-Nachtdienst wäre unsinnig; passt die
+ *  Summe nicht auf genug Abende, wird der Plan klar abgelehnt. */
+const NIGHT_MAX_HOURS = 5;
+/** Zielschnitt je Abend ~3 h => kürzere Dienste, dafür auf MEHR Abende verteilt
+ *  (die Abendreinigung soll auf möglichst viele Tage fallen). */
+const NIGHT_AVG_HOURS = 3;
+
+/**
+ * Verteilt `hours` GLEICHMÄSSIG auf `parts` Blöcke (in Minuten): Basiswert
+ * abrunden, den Rest reihum je +1 h. Die Längen unterscheiden sich um höchstens
+ * eine Stunde – „chia đều", kein Zufall, kein Gewicht.
+ */
+function evenChunks(hours: number, parts: number): number[] {
+  const base = Math.floor(hours / parts);
+  const rem = hours - base * parts;
+  return Array.from({ length: parts }, (_, i) => (base + (i < rem ? 1 : 0)) * 60);
+}
+
+/**
+ * Wählt bis zu `want` Tage aus `candidates`, die die 6-Tage-Regel wahren, und
+ * reserviert sie sofort in `worked` (damit die nächste Wahl sie mitzählt).
+ * Reihenfolge zufällig (rng) => gestreut über den Monat.
+ */
+function pickSafeDays(
+  candidates: string[],
+  worked: Set<string>,
+  want: number,
+  rng: () => number,
+): string[] {
+  const chosen: string[] = [];
+  for (const d of shuffled(candidates, rng)) {
+    if (chosen.length >= want) break;
+    if (consecutiveRunLengthWith(worked, d) > 6) continue;
+    chosen.push(d);
+    worked.add(d);
+  }
+  return chosen;
+}
+
+/** Eine eingeplante Sonntagsreinigung (Tag + bezahlte Minuten + Pause). */
 type SundayAssignment = { empId: string; date: string; paid: number; pause: number };
 
 /**
- * Verteilt EINEN Reinigungsdienst je geschlossenem Sonntag reihum auf die Kräfte,
- * die sonntags eingeplant werden dürfen. Deterministisch – für jeden Anlauf
- * gleich. `minutesPerSunday` ist die Store-Vorgabe (bezahlte Reinigungsminuten
- * je Sonntag); es gibt kein Soll je Person mehr.
+ * Wählt je Person die Sonntage für die Reinigung und die Längen – und reserviert
+ * die Tage sofort in state.worked. Läuft VOR der Ladenplatzierung, damit der
+ * Scheduler rund um diese Sonntage einen Ruhetag frei lässt (6-Tage-Regel);
+ * die eigentlichen Dienste werden erst nach den Reparaturen angehängt
+ * (addSundayShifts), damit die Stoßzeiten-Reparatur sie nicht verschiebt.
+ *
+ * Zusätzlich zum Soll – reserviert KEINE Sollstunden.
  */
-function planSundayCleaning(
+function planSundayAssignments(
+  state: SchedulerState,
   employees: Employee[],
-  sundays: string[],
-  minutesPerSunday: number,
-  rotationOffset = 0,
+  closedSundays: string[],
+  rng: () => number,
 ): SundayAssignment[] {
-  if (!Number.isInteger(minutesPerSunday) || minutesPerSunday < 0 ||
-      minutesPerSunday > 8 * 60 || minutesPerSunday % 60 !== 0) {
-    throw new Error("Giờ dọn mỗi Chủ nhật phải là số nguyên từ 0 đến 8 giờ.");
-  }
-  if (minutesPerSunday === 0 || sundays.length === 0) return [];
-  const remaining = new Map(employees.map((e) => [e.id, e.targetMinutes]));
-  const assignments: SundayAssignment[] = [];
-  let cursor = employees.length > 0 ? rotationOffset % employees.length : 0;
-  for (const date of sundays) {
-    let assigned = false;
-    for (let offset = 0; offset < employees.length; offset++) {
-      const index = (cursor + offset) % employees.length;
-      const emp = employees[index];
-      const rest = remaining.get(emp.id)! - minutesPerSunday;
-      if (!mayWorkOn(emp, date) || rest < 0 || (rest > 0 && rest < MIN_SHIFT_MINUTES)) continue;
-      assignments.push({ empId: emp.id, date, paid: minutesPerSunday,
-        pause: calculatePause(minutesPerSunday, emp.employmentType) });
-      remaining.set(emp.id, rest);
-      cursor = (index + 1) % employees.length;
-      assigned = true;
-      break;
+  const plan: SundayAssignment[] = [];
+  for (const emp of employees) {
+    const total = emp.sundayMinutes ?? 0;
+    if (total <= 0) continue;
+    if (total % 60 !== 0) throw new Error(`Giờ Chủ nhật của ${emp.name} phải là số giờ nguyên.`);
+    const hours = total / 60;
+    const worked = state.worked.get(emp.id)!;
+    const eligible = closedSundays.filter((d) => mayWorkOn(emp, d));
+    // Sonntag ist der Ruhetag – kein Nachfrage-Gewicht, keine zufälligen Längen.
+    // Die Reinigung wird GLEICHMÄSSIG auf wenige Sonntage verteilt (Ziel ~7 h je
+    // Dienst, die Längen unterscheiden sich um höchstens 1 h). Bewusst NICHT auf
+    // alle Sonntage gestreut: jeder belegte Sonntag kostet über die 6-Tage-Regel
+    // einen Ladentag – in kurzen Monaten würde das Soll sonst nicht aufgehen.
+    const wantDays = Math.min(
+      eligible.length,
+      Math.max(Math.ceil(hours / SUNDAY_MAX_HOURS), Math.round(hours / 7), 1),
+    );
+    const days = pickSafeDays(eligible, worked, wantDays, rng).sort();
+    if (days.length === 0) {
+      throw new Error(`Không xếp được ${hours}h dọn Chủ nhật cho ${emp.name} (thiếu Chủ nhật trống hợp lệ).`);
     }
-    if (!assigned) throw new Error(`Không đủ nhân viên được làm Chủ nhật hoặc giờ định mức để dọn ngày ${date}.`);
-  }
-  return assignments;
-}
-
-/**
- * Continue Sunday rotation across independently generated months. The UI
- * generates one month at a time, so the calendar itself supplies the offset.
- */
-function sundayRotationOffset(
-  year: number,
-  month: number,
-  dayOf: (isoDate: string) => ResolvedDay,
-  overrides: OverrideMap,
-): number {
-  let count = 0;
-  for (let m = 1; m < month; m++) {
-    for (const date of datesOfMonth(year, m)) {
-      if (
-        weekdayKeyOf(parseIsoDate(date)) === "sunday" &&
-        dayOf(date).closed &&
-        !overrides[date]?.closed
-      ) count++;
+    // Geht die Summe nur mit Diensten über der Tageshöchstzeit auf, ist es zu viel.
+    if (Math.ceil(hours / days.length) > SUNDAY_MAX_HOURS) {
+      throw new Error(`Số giờ Chủ nhật của ${emp.name} quá lớn cho số Chủ nhật trong tháng.`);
     }
+    const chunks = evenChunks(hours, days.length);
+    days.forEach((date, i) => {
+      const paid = chunks[i];
+      plan.push({ empId: emp.id, date, paid, pause: calculatePause(paid, emp.employmentType) });
+    });
   }
-  return count;
+  return plan;
 }
 
-/**
- * Reserviert die Sonntagsreinigung im Monats-Soll: die eingeteilte Person
- * bekommt entsprechend weniger Ladenstunden. Läuft VOR der Platzierung; der
- * eigentliche Dienst wird erst NACH den Reparaturen angehängt (addSundayShifts),
- * damit ihn die Stoßzeiten-Reparatur nicht wieder verschiebt.
- */
-function reserveSundayTarget(st: SchedulerState, plan: SundayAssignment[]): void {
-  for (const a of plan) {
-    st.remaining.set(a.empId, (st.remaining.get(a.empId) ?? 0) - a.paid);
-    // Reserve dates as well: all placement/repair passes must see Sunday when
-    // checking weekly limits and consecutive working days.
-    st.worked.get(a.empId)!.add(a.date);
-  }
-}
-
-/** Hängt die Sonntagsreinigung als eigene Dienste an (nach den Reparaturen). */
-function addSundayCleaningShifts(state: SchedulerState, plan: SundayAssignment[]): void {
+/** Hängt die reservierten Sonntagsreinigungen als eigene Dienste an (nach Reparaturen). */
+function addSundayShifts(state: SchedulerState, plan: SundayAssignment[]): void {
   for (const a of plan) {
     state.shifts.push({
       id: nextShiftId(),
@@ -2150,6 +2205,120 @@ function addSundayCleaningShifts(state: SchedulerState, plan: SundayAssignment[]
       generated: true,
     });
     state.worked.get(a.empId)?.add(a.date);
+  }
+}
+
+/** Ein Tag für die Abendreinigung: entweder Schließer verlängern oder neuer Block. */
+type NightSlot = { extend: Shift } | { date: string };
+
+/**
+ * Abendarbeit nach 20:00 je Person: streut nightMinutes auf einige Tage.
+ * Bevorzugt werden vorhandene Schließer-Dienste (Ende genau 20:00) – ihre Zeit
+ * wird nach hinten verlängert (die Minuten nach 20:00 sind Nachtzuschlag) und es
+ * entsteht KEIN zusätzlicher Arbeitstag. Reichen die Schließer nicht, kommen freie
+ * Werktage dazu, die die 6-Tage-Regel wahren. Zusätzlich zum Soll.
+ */
+function planNightWork(state: SchedulerState, employees: Employee[], rng: () => number): void {
+  // Tage, an denen schon jemand die Abendreinigung macht – wird pro Person
+  // gemieden, damit die Abendreinigung auf MÖGLICHST VIELE verschiedene Tage
+  // fällt (nicht zwei Kräfte am selben Abend, während andere Abende leer bleiben).
+  const nightDates = new Set<string>();
+  /** Reihenfolge: erst Tage OHNE Abendreinigung (zufällig), dann die mit. */
+  const preferFree = <T,>(arr: readonly T[], dateOf: (x: T) => string): T[] =>
+    shuffled(arr, rng).sort(
+      (a, b) => (nightDates.has(dateOf(a)) ? 1 : 0) - (nightDates.has(dateOf(b)) ? 1 : 0),
+    );
+
+  for (const emp of employees) {
+    const total = emp.nightMinutes ?? 0;
+    if (total <= 0) continue;
+    if (total % 60 !== 0) throw new Error(`Giờ làm sau 20h của ${emp.name} phải là số giờ nguyên.`);
+    const hours = total / 60;
+    const worked = state.worked.get(emp.id)!;
+
+    // Schließer-Dienste (Ende genau 20:00, nicht Sonntag): verlängerbar ohne neuen Tag.
+    const closers = state.shifts.filter(
+      (s) => s.employeeId === emp.id && s.endMinutes === NIGHT_START && s.category !== "SUNDAY",
+    );
+    const freeDays = state.dates.filter(
+      (d) =>
+        !state.dayOf(d).closed &&
+        weekdayKeyOf(parseIsoDate(d)) !== "sunday" &&
+        mayWorkOn(emp, d) &&
+        !worked.has(d),
+    );
+
+    // Anzahl Abende: mind. so viele, dass kein Dienst über NIGHT_MAX_HOURS geht,
+    // Zielschnitt ~NIGHT_AVG_HOURS (3–4 h je Abend). Schließer zuerst (kein neuer
+    // Tag), dann freie Werktage. GLEICHMÄSSIG verteilt (evenChunks), nicht zufällig.
+    const needed = Math.ceil(hours / NIGHT_MAX_HOURS);
+    const wantDays = Math.min(
+      closers.length + freeDays.length,
+      Math.max(needed, Math.round(hours / NIGHT_AVG_HOURS)),
+    );
+    // Schließer bevorzugt an Tagen ohne Abendreinigung wählen (breit streuen).
+    const useClosers = preferFree(closers, (s) => s.date).slice(0, Math.min(wantDays, closers.length));
+    // Freie Werktage ebenso bevorzugt-frei, aber 6-Tage-Regel wahren.
+    const extraNeeded = wantDays - useClosers.length;
+    const extraDays: string[] = [];
+    if (extraNeeded > 0) {
+      for (const d of preferFree(freeDays, (d) => d)) {
+        if (extraDays.length >= extraNeeded) break;
+        if (consecutiveRunLengthWith(worked, d) > 6) continue;
+        extraDays.push(d);
+        worked.add(d);
+      }
+    }
+    const slots: NightSlot[] = [
+      ...useClosers.map((s) => ({ extend: s }) as NightSlot),
+      ...extraDays.map((d) => ({ date: d }) as NightSlot),
+    ];
+    // Passt die Summe nicht auf genug Abende (jeder <= NIGHT_MAX_HOURS), wird der
+    // Plan klar abgelehnt – NIE ein 15-h-Nachtdienst.
+    if (slots.length < needed) {
+      throw new Error(
+        `Không đủ ngày để xếp ${hours}h làm sau 20h cho ${emp.name} ` +
+          `(mỗi ca tối đa ${NIGHT_MAX_HOURS}h). Giảm giờ đêm hoặc để người này làm ít ngày ban ngày hơn.`,
+      );
+    }
+    const chunks = evenChunks(hours, slots.length);
+    slots.forEach((slot, i) => {
+      const paid = chunks[i];
+      if ("extend" in slot) {
+        // Abendreinigung nach 20:00 an den Schließer hängen (= Nachtzuschlag).
+        const s = slot.extend;
+        const oldPause = s.pauseMinutes;
+        s.endMinutes += paid;
+        s.paidMinutes += paid;
+        s.nightMinutes = (s.nightMinutes ?? 0) + paid;
+        // Kommt der Dienst inkl. Abend über 6 h, ist die gesetzliche Pause fällig.
+        // Sie wird VORNE eingefügt (Beginn nach vorn verlegt), damit der Teil nach
+        // 20:00 (Nachtzuschlag) exakt die Reinigungszeit bleibt und die Pause nicht
+        // fälschlich als Nachtarbeit zählt.
+        const newPause = calculatePause(s.paidMinutes, emp.employmentType);
+        if (newPause !== oldPause) {
+          s.startMinutes -= newPause - oldPause;
+          s.pauseMinutes = newPause;
+        }
+        nightDates.add(s.date);
+      } else {
+        state.shifts.push({
+          id: nextShiftId(),
+          employeeId: emp.id,
+          date: slot.date,
+          startMinutes: NIGHT_START,
+          endMinutes: NIGHT_START + paid,
+          pauseMinutes: 0,
+          paidMinutes: paid,
+          // Ganz nach 20:00 => komplett Nachtzuschlag (Ladenteil 0).
+          nightMinutes: paid,
+          shiftType: "CUSTOM",
+          generated: true,
+        });
+        // worked wurde oben beim Auswählen des freien Tages gesetzt.
+        nightDates.add(slot.date);
+      }
+    });
   }
 }
 
@@ -2169,22 +2338,15 @@ export function generateSchedule(input: GenerateInput): Shift[] {
   const totalTargetMin = employees.reduce((sum, e) => sum + e.targetMinutes, 0);
   const totalWeight = dates.reduce((sum, d) => sum + weightOf(d), 0);
 
-  // Sonntagsreinigung: EIN Dienst je geschlossenem Sonntag, reihum vergeben.
-  // Wird im Monats-Soll reserviert (reserveSundayTarget) und erst nach den
-  // Reparaturen als eigener Dienst angehängt (addSundayCleaningShifts).
+  // Geschlossene Sonntage des Monats (für die Sonntagsarbeit weiter unten).
+  // Ein per Datum als offen markierter Sonntag zählt nicht als Reinigungstag.
   const closedSundays = dates.filter(
     (d) => weekdayKeyOf(parseIsoDate(d)) === "sunday" && dayOf(d).closed && !overrides[d]?.closed,
   );
-  const sundayPlan = planSundayCleaning(
-    employees,
-    closedSundays,
-    input.sundayCleaningMinutes ?? 0,
-    sundayRotationOffset(year, month, dayOf, overrides),
-  );
-  const sundayReservedTotal = sundayPlan.reduce((s, a) => s + a.paid, 0);
-  // Für die Tages-Sollverteilung zählt nur der LADEN-Anteil: die Sonntagsstunden
-  // liegen an geschlossenen Sonntagen (Gewicht 0) und werden separat vergeben.
-  const floorTargetMin = totalTargetMin - sundayReservedTotal;
+  // Abend- und Sonntagsarbeit sind ZUSÄTZLICH zum Soll (eigene Töpfe je Person),
+  // werden erst nach den Reparaturen angehängt und zählen daher hier nicht mit:
+  // das Tages-Soll verteilt nur die Ladenstunden (targetMinutes).
+  const floorTargetMin = totalTargetMin;
 
   // Erst der Boden für die Stoßzeit, dann die Gewichtung auf den Rest.
   // Reicht die Gesamtsumme nicht einmal für den Boden, wird rein nach Gewicht
@@ -2250,8 +2412,13 @@ export function generateSchedule(input: GenerateInput): Shift[] {
       peaksOf: (isoDate: string) => PEAK_WINDOWS_BY_WEEKDAY[effKeyOf(isoDate)],
       rng: seededRandom(seed + salt),
       varyLengths,
+      sundayPlan: [],
     };
-    reserveSundayTarget(st, sundayPlan);
+
+    // Sonntage VOR der Platzierung reservieren: markiert die Tage in st.worked,
+    // damit der Scheduler rund um sie einen Ruhetag frei lässt (6-Tage-Regel).
+    // Die Dienste selbst kommen erst nach den Reparaturen dazu (addSundayShifts).
+    st.sundayPlan = planSundayAssignments(st, employees, closedSundays, st.rng);
 
     // Rundenweise, rotierend platzieren: pro Runde eine Schicht je Mitarbeiter,
     // bis jedes Monats-Soll exakt erreicht ist.
@@ -2295,7 +2462,11 @@ export function generateSchedule(input: GenerateInput): Shift[] {
   // balancer, which may otherwise reset the coordinated closer swap.
   rebalanceSaturdayAfternoon(state);
 
-  addSundayCleaningShifts(state, sundayPlan);
+  // Die vor der Platzierung reservierten Sonntagsreinigungen jetzt als Dienste
+  // anhängen; danach die Abendarbeit (verlängert Schließer). Nutzt den RNG des
+  // gewählten Laufs weiter – deterministisch für denselben Seed.
+  addSundayShifts(state, state.sundayPlan);
+  planNightWork(state, employees, state.rng);
 
   // Stabil sortieren: nach Datum, dann Startzeit, dann Mitarbeiter.
   state.shifts.sort(

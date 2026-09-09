@@ -18,6 +18,9 @@ import {
 } from "../lib/workHours";
 import { emptySchedule, normalizeSchedule, workHoursForGeneration } from "../lib/scheduleDefaults";
 
+/** Höchstzahl der Beschäftigten je Filiale (Vorgabe Miss Do). */
+export const MAX_EMPLOYEES = 15;
+
 /**
  * Steht in diesem Stand überhaupt etwas? Maßstab sind Mitarbeiter und
  * Schichten – Firmenname und Monat allein sind noch kein Inhalt.
@@ -50,6 +53,8 @@ export function useSchedule() {
     return persisted?.originalShifts ?? [];
   });
   const [genError, setGenError] = useState<string | null>(null);
+  // Kurze Erfolgsmeldung nach dem Erzeugen (die UI blendet sie selbst wieder aus).
+  const [genNotice, setGenNotice] = useState<string | null>(null);
   const [remoteStatus, setRemoteStatus] = useState<RemoteStatus>(
     isRemoteConfigured ? "idle" : "off",
   );
@@ -292,6 +297,7 @@ export function useSchedule() {
    */
   const addEmployee = useCallback((data: Omit<Employee, "id">): string | null => {
     if (latest.current.schedule.lockedAt) return null; // Monat gedruckt und gesperrt
+    if (latest.current.schedule.employees.length >= MAX_EMPLOYEES) return null; // höchstens 15
     const emp: Employee = {
       ...data,
       id: newEmployeeId(),
@@ -330,6 +336,7 @@ export function useSchedule() {
     // Ein neuer Plan hebt die Sperre des Monats auf: das alte gedruckte Blatt
     // ist überholt, die „gedruckt"-Häkchen der Wochen verschwinden mit.
     setGenError(null);
+    setGenNotice(null);
     try {
       const workHours = workHoursForGeneration(schedule);
       const shifts = generateSchedule({
@@ -338,10 +345,10 @@ export function useSchedule() {
         workHours,
         overrides: overridesToMap(schedule.dateOverrides),
         employees: schedule.employees,
-        sundayCleaningMinutes: schedule.sundayCleaningMinutes,
       });
-      setSchedule((s) => ({ ...s, workHours, shifts, surchargeModelVersion: 2, lockedAt: undefined, printedWeeks: [] }));
+      setSchedule((s) => ({ ...s, workHours, shifts, surchargeModelVersion: 3, lockedAt: undefined, printedWeeks: [] }));
       setOriginalShifts(shifts.map((sh) => ({ ...sh })));
+      setGenNotice(`Đã tạo xong lịch làm việc tháng ${schedule.month}/${schedule.year} (${shifts.length} ca).`);
     } catch (err) {
       setGenError(err instanceof Error ? err.message : String(err));
     }
@@ -351,7 +358,6 @@ export function useSchedule() {
     schedule.workHours,
     schedule.dateOverrides,
     schedule.employees,
-    schedule.sundayCleaningMinutes,
     schedule.surchargeModelVersion,
     isLocked,
   ]);
@@ -471,6 +477,8 @@ export function useSchedule() {
     markWeekPrinted,
     unlockMonth,
     genError,
+    genNotice,
+    dismissGenNotice: () => setGenNotice(null),
     hasOriginal: originalShifts.length > 0,
     updateMeta,
     addEmployee,

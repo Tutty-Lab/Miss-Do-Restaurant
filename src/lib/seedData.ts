@@ -65,7 +65,11 @@ const AUGUST: Employee[] = VOLL.filter((e) => e.id !== "ma-14");
 
 export const SEED_MONTHS: SeedMonth[] = [
   { year: 2026, month: 6, label: "Juni 2026", employees: VOLL.map((e) => ({ ...e })) },
-  { year: 2026, month: 7, label: "Juli 2026", employees: JULI.map((e) => ({ ...e })) },
+  // Juli: Urlaubsmonat, zwei Teilzeitkräfte fehlen. Mit den dichten Spitzen
+  // (mittags & abends je 3 Köpfe) reicht die dünne Besetzung nicht überall –
+  // an einigen Tagen bleibt eine Spitze unterbesetzt (bekannter Engpass, kein
+  // Planungsfehler; das Dashboard weist diese Tage aus).
+  { year: 2026, month: 7, label: "Juli 2026", employees: JULI.map((e) => ({ ...e })), maxPeakGaps: 12 },
   { year: 2026, month: 8, label: "August 2026", employees: AUGUST.map((e) => ({ ...e })) },
 ];
 
@@ -78,9 +82,8 @@ export function scheduleForSeed(seed: SeedMonth): Schedule {
     year: seed.year,
     month: seed.month,
     workHours: structuredClone(DEFAULT_WORK_HOURS),
-    surchargeModelVersion: 2,
+    surchargeModelVersion: 3,
     surchargeConfig: { after20Percent: 0, sundayPercent: 0 },
-    sundayCleaningMinutes: 120,
     dateOverrides: [],
     employees: seed.employees.map((e) => ({ ...e })),
     shifts: [],

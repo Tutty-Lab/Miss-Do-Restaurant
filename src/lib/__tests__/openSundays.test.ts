@@ -77,7 +77,7 @@ describe("Uhrzeiten eines offenen Sonntags", () => {
       ...DEFAULT_WORK_HOURS,
       perWeekday: { ...DEFAULT_WORK_HOURS.perWeekday, sunday: [] },
     };
-    expect(sundayWindowOf(config)).toEqual({ startMinutes: 570, endMinutes: 1320 });
+    expect(sundayWindowOf(config)).toEqual({ startMinutes: 570, endMinutes: 1200 });
   });
 });
 
@@ -111,7 +111,6 @@ describe("Plan an einem verkaufsoffenen Sonntag", () => {
     workHours: DEFAULT_WORK_HOURS,
     employees,
     overrides,
-    sundayCleaningMinutes: 120,
   });
 
   it("plant Ladendienste an diesem Sonntag", () => {
@@ -136,7 +135,7 @@ describe("Plan an einem verkaufsoffenen Sonntag", () => {
   });
 
   it("erzeugt keine Überschneidung", () => {
-    const result = validateSchedule(employees, shifts);
+    const result = validateSchedule(employees, shifts, false);
     const echte = result.errors.filter((e) => e.severity !== "warning");
     expect(echte).toEqual([]);
   });
@@ -212,11 +211,10 @@ describe("Ganzer Monat mit offenen Sonntagen", () => {
     workHours: DEFAULT_WORK_HOURS,
     employees: SAMPLE_EMPLOYEES,
     overrides,
-    sundayCleaningMinutes: 120,
   });
 
   it("bleibt regelkonform", () => {
-    const result = validateSchedule(SAMPLE_EMPLOYEES, shifts);
+    const result = validateSchedule(SAMPLE_EMPLOYEES, shifts, false);
     const echte = result.errors.filter((e) => e.severity !== "warning");
     expect(echte).toEqual([]);
   });

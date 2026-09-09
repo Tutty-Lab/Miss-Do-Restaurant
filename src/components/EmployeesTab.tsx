@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import type { UseScheduleReturn } from "../hooks/useSchedule";
+import { MAX_EMPLOYEES, type UseScheduleReturn } from "../hooks/useSchedule";
 import type { Employee, EmploymentType } from "../types";
 import { WEEKDAY_ORDER, WEEKDAY_SHORT_VI, type WeekdayKey } from "../lib/demand";
 import { employmentLabelVi, employmentShortVi } from "../lib/employment";
@@ -33,6 +33,8 @@ type Draft = {
   persNr: string;
   employmentType: EmploymentType;
   hours: string;
+  sundayHours: string; // Giờ dọn Chủ nhật / tháng (cộng thêm)
+  nightHours: string; // Giờ làm sau 20h / tháng (cộng thêm)
   availableWeekdays: WeekdayKey[]; // [] = alle Tage
   maxDaysPerWeek: string;
 };
@@ -43,6 +45,8 @@ function draftFrom(emp?: Employee): Draft {
     persNr: emp?.persNr ?? "",
     employmentType: emp?.employmentType ?? "VOLLZEIT",
     hours: emp ? String(emp.targetMinutes / 60) : "176",
+    sundayHours: emp?.sundayMinutes ? String(emp.sundayMinutes / 60) : "",
+    nightHours: emp?.nightMinutes ? String(emp.nightMinutes / 60) : "",
     availableWeekdays: emp?.availableWeekdays ?? [],
     maxDaysPerWeek: emp?.maxDaysPerWeek ? String(emp.maxDaysPerWeek) : "",
   };
@@ -51,12 +55,16 @@ function draftFrom(emp?: Employee): Draft {
 /** Entwurf -> Mitarbeiter-Felder (ohne id). Leere Optionen werden zu undefined. */
 function draftToEmployee(d: Draft): Omit<Employee, "id"> {
   const stunden = Math.max(0, Math.round(Number(d.hours) || 0));
+  const sonntag = Math.max(0, Math.round(Number(d.sundayHours) || 0));
+  const nacht = Math.max(0, Math.round(Number(d.nightHours) || 0));
   const tage = Number(d.maxDaysPerWeek);
   return {
     name: d.name.trim() || "Nhân viên mới",
     persNr: d.persNr.trim() || undefined,
     employmentType: d.employmentType,
     targetMinutes: stunden * 60,
+    sundayMinutes: sonntag > 0 ? sonntag * 60 : undefined,
+    nightMinutes: nacht > 0 ? nacht * 60 : undefined,
     availableWeekdays: d.availableWeekdays.length > 0 ? d.availableWeekdays : undefined,
     maxDaysPerWeek: d.maxDaysPerWeek === "" || tage < 1 ? undefined : Math.min(7, Math.round(tage)),
   };
@@ -65,6 +73,7 @@ function draftToEmployee(d: Draft): Omit<Employee, "id"> {
 export function EmployeesTab({ store }: { store: UseScheduleReturn }) {
   const { schedule, addEmployee, updateEmployee, removeEmployee } = store;
   const locked = Boolean(schedule.lockedAt);
+  const atMax = schedule.employees.length >= MAX_EMPLOYEES;
 
   // null = zu; "new" = anlegen; sonst = die id, die bearbeitet wird.
   const [offen, setOffen] = useState<null | "new" | string>(null);
@@ -84,13 +93,14 @@ export function EmployeesTab({ store }: { store: UseScheduleReturn }) {
           Nhân viên
           {schedule.employees.length > 0 && (
             <span className="ml-2 text-sm font-normal text-slate-400">
-              {schedule.employees.length}
+              {schedule.employees.length}/{MAX_EMPLOYEES}
             </span>
           )}
         </h2>
         <button
           onClick={() => setOffen("new")}
-          disabled={locked}
+          disabled={locked || atMax}
+          title={atMax ? `Tối đa ${MAX_EMPLOYEES} nhân viên` : undefined}
           className="rounded-lg bg-slate-900 px-3 py-1.5 text-sm font-medium text-white hover:bg-slate-700 active:bg-slate-800 disabled:opacity-40"
         >
           + Thêm
@@ -100,6 +110,12 @@ export function EmployeesTab({ store }: { store: UseScheduleReturn }) {
       {locked && (
         <div className="mb-3 rounded bg-amber-50 border border-amber-200 text-amber-900 text-sm px-3 py-2">
           Lịch tháng này đã khoá vì đã in — mở khoá ở tab <b>Bảng chấm công</b> để sửa nhân viên.
+        </div>
+      )}
+
+      {atMax && !locked && (
+        <div className="mb-3 rounded bg-amber-50 border border-amber-200 text-amber-900 text-sm px-3 py-2">
+          Đã đạt tối đa <b>{MAX_EMPLOYEES}</b> nhân viên. Xoá bớt người nếu muốn thêm người mới.
         </div>
       )}
 
@@ -124,7 +140,7 @@ export function EmployeesTab({ store }: { store: UseScheduleReturn }) {
       )}
 
       {/* Nút nổi trên mobile để thêm nhanh mà không phải cuộn lên đầu. */}
-      {!locked && (
+      {!locked && !atMax && (
         <button
           onClick={() => setOffen("new")}
           aria-label="Thêm nhân viên"
@@ -183,6 +199,12 @@ function EmployeeSummaryRow({ emp }: { emp: Employee }) {
         <span>
           {stunden}h · <span className={info.ok ? "" : "text-rose-600"}>{info.text}</span>
         </span>
+        {emp.sundayMinutes ? (
+          <span className="text-slate-400">· CN {emp.sundayMinutes / 60}h</span>
+        ) : null}
+        {emp.nightMinutes ? (
+          <span className="text-slate-400">· đêm {emp.nightMinutes / 60}h</span>
+        ) : null}
         {tage && tage.length > 0 && (
           <span className="text-slate-400">
             · {tage.map((k) => WEEKDAY_SHORT_VI[k]).join(" ")}
@@ -304,6 +326,38 @@ function EmployeeSheet({
             {stunden > WARN_HOURS && (
               <span className="text-amber-600"> · ⚠ trên {WARN_HOURS}h rất khó xếp</span>
             )}
+          </div>
+
+          <div className="grid grid-cols-2 gap-3">
+            <label className="block">
+              <span className="text-xs text-slate-600">Giờ Chủ nhật / tháng</span>
+              <input
+                type="number"
+                inputMode="numeric"
+                min={0}
+                step={1}
+                placeholder="0"
+                className={`${inputClass} w-full mt-1`}
+                value={d.sundayHours}
+                onChange={(e) => set("sundayHours", e.target.value)}
+              />
+            </label>
+            <label className="block">
+              <span className="text-xs text-slate-600">Giờ sau 20h / tháng</span>
+              <input
+                type="number"
+                inputMode="numeric"
+                min={0}
+                step={1}
+                placeholder="0"
+                className={`${inputClass} w-full mt-1`}
+                value={d.nightHours}
+                onChange={(e) => set("nightHours", e.target.value)}
+              />
+            </label>
+          </div>
+          <div className="text-xs text-slate-400">
+            Dọn Chủ nhật &amp; làm sau 20h — cộng thêm ngoài định mức, rải ngẫu nhiên ra vài ngày.
           </div>
 
           <div>

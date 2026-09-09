@@ -106,21 +106,12 @@ describe.each(runs)("Seed-Monat: $seed.label", ({ seed, shifts, floor, analysis 
     expect(luecken).toEqual([]);
   });
 
-  it("Ladendienst: Beginn ab 9:30, Ende 22:00", () => {
+  it("Ladendienst: Beginn ab 9:30, Ende 20:00 (Abendreinigung separat)", () => {
     for (const s of floor) {
       expect(s.startMinutes).toBeGreaterThanOrEqual(9 * 60 + 30);
-      expect(s.endMinutes).toBeLessThanOrEqual(22 * 60);
-    }
-  });
-
-  it("has exactly one continuous closer from 20:00 to 22:00 on every open weekday", () => {
-    const dates = new Set(shifts.filter(isFloor).map((s) => s.date));
-    for (const date of dates) {
-      const night = shifts.filter((s) => s.date === date && s.endMinutes > 1200);
-      expect(night, date).toHaveLength(1);
-      expect(night[0].startMinutes).toBeLessThan(1200);
-      expect(night[0].endMinutes).toBe(1320);
-      expect(night[0].paidMinutes).toBeLessThanOrEqual(540);
+      // Ohne eigene Abend-/Sonntagstöpfe endet der Ladendienst um 20:00.
+      const ladenEnd = s.endMinutes - (s.nightMinutes ?? 0);
+      expect(ladenEnd).toBeLessThanOrEqual(20 * 60);
     }
   });
 

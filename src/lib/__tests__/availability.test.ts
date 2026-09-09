@@ -28,9 +28,11 @@ const emp = (
 const plane = (employees: Employee[], month: number) =>
   generateSchedule({ year: YEAR, month, workHours: DEFAULT_WORK_HOURS, employees });
 
+// Max 6-h-Schichten => höchstens ~24 Arbeitstage à 6 h = 144 h/Monat. Die Ziele
+// bleiben darunter, damit der Plan in JEDEM Monat aufgeht.
 const voll = (extra: Partial<Employee> = {}) => [
-  emp("vz-1", "VOLLZEIT", 160, extra),
-  emp("vz-2", "VOLLZEIT", 160),
+  emp("vz-1", "VOLLZEIT", 120, extra),
+  emp("vz-2", "VOLLZEIT", 120),
   emp("tz-1", "TEILZEIT", 90),
   emp("mj-1", "MINIJOB", 40),
   emp("mj-2", "MINIJOB", 40),
@@ -41,7 +43,9 @@ const voll = (extra: Partial<Employee> = {}) => [
 describe("Feste Arbeitstage", () => {
   for (const month of [8, 9, 10]) {
     it(`tháng ${month}: chỉ xếp vào đúng những thứ đã chọn`, () => {
-      const mini = emp("mj-frso", "MINIJOB", 30, {
+      // Nur Freitag ist offen (Sonntag zu). Minijob-Schichten sind höchstens 5 h,
+      // 4 Freitage => höchstens 20 h.
+      const mini = emp("mj-frso", "MINIJOB", 20, {
         availableWeekdays: ["friday", "sunday"],
       });
       const team = [...voll().slice(0, 6), mini];
@@ -87,7 +91,7 @@ describe("Höchstzahl der Arbeitstage je Woche", () => {
   it("beides zusammen: feste Tage UND ein Wochendeckel", () => {
     const team = [
       ...voll().slice(0, 6),
-      emp("tz-x", "TEILZEIT", 60, {
+      emp("tz-x", "TEILZEIT", 48, {
         availableWeekdays: ["tuesday", "wednesday", "thursday", "friday"],
         maxDaysPerWeek: 2,
       }),

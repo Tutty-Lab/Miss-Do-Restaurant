@@ -1,5 +1,5 @@
 import { shiftMinutesAfter20 } from "../lib/zuschlaege";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type { UseScheduleReturn } from "../hooks/useSchedule";
 import type { Shift } from "../types";
 import {
@@ -32,7 +32,15 @@ function cellClass(shift: Shift | undefined): string {
 export function ScheduleTab({ store }: { store: UseScheduleReturn }) {
   // Drucken (Monat/Woche) und Entsperren liegen im Tab „Bảng chấm công" –
   // dort sitzt alles, was Papier erzeugt.
-  const { schedule, validation, generate, genError, isLocked } = store;
+  const { schedule, validation, generate, genError, genNotice, dismissGenNotice, peakGaps, isLocked } = store;
+  // Chi tiết cảnh báo/lỗi ẩn sau nút (i), chỉ hiện khi bấm.
+  const [showIssues, setShowIssues] = useState(false);
+  // Erfolgsmeldung nach dem Erzeugen selbst wieder ausblenden (5 s).
+  useEffect(() => {
+    if (!genNotice) return;
+    const t = setTimeout(() => dismissGenNotice(), 5000);
+    return () => clearTimeout(t);
+  }, [genNotice, dismissGenNotice]);
   const [selected, setSelected] = useState<{ employeeId: string; date: string } | null>(null);
   // Zweiter Klick, um einen gesperrten (gedruckten) Monat neu zu erzeugen.
   const [confirmRegen, setConfirmRegen] = useState(false);
@@ -92,8 +100,8 @@ export function ScheduleTab({ store }: { store: UseScheduleReturn }) {
 
   // Tổng theo ngày cho các dòng chân bảng.
   const dayStats = useMemo(() => {
-    const stats = new Map<string, { count: number; total: number; early: number; late: number }>();
-    for (const d of dates) stats.set(d, { count: 0, total: 0, early: 0, late: 0 });
+    const stats = new Map<string, { count: number; total: number; early: number; late: number; night: number }>();
+    for (const d of dates) stats.set(d, { count: 0, total: 0, early: 0, late: 0, night: 0 });
     for (const s of schedule.shifts) {
       const st = stats.get(s.date);
       if (!st) continue;
@@ -101,6 +109,8 @@ export function ScheduleTab({ store }: { store: UseScheduleReturn }) {
       st.total += s.paidMinutes;
       if (s.shiftType === "EARLY") st.early += 1;
       else st.late += 1; // LATE hoặc CUSTOM tính là ca tối
+      // Ca có phần làm sau 20h (không tính dọn Chủ nhật) => đếm là ca đêm.
+      if (s.category !== "SUNDAY" && shiftMinutesAfter20(s) > 0) st.night += 1;
     }
     return stats;
   }, [dates, schedule.shifts]);
@@ -217,23 +227,79 @@ export function ScheduleTab({ store }: { store: UseScheduleReturn }) {
         </div>
       )}
 
-      {genError && (
-        <div className="mb-3 rounded bg-rose-50 border border-rose-200 text-rose-700 text-sm px-3 py-2">
-          {genError}
+      {genNotice && (
+        <div className="mb-3 flex items-start justify-between gap-3 rounded bg-emerald-50 border border-emerald-200 text-emerald-800 text-sm px-3 py-2">
+          <span>✓ {genNotice}</span>
+          <button onClick={dismissGenNotice} className="text-emerald-600 hover:text-emerald-800 leading-none">✕</button>
         </div>
       )}
 
-      {/* Lỗi kiểm tra */}
-      {!validation.valid && schedule.shifts.length > 0 && (
-        <div className="mb-3 rounded bg-rose-50 border border-rose-200 text-rose-700 text-sm px-3 py-2">
-          <div className="font-medium mb-1">Lỗi kiểm tra ({validation.errors.length}):</div>
-          <ul className="list-disc pl-5 space-y-0.5 max-h-40 overflow-auto">
-            {validation.errors.slice(0, 30).map((e, i) => (
-              <li key={i}>{e.message}</li>
-            ))}
-          </ul>
-        </div>
-      )}
+      {/* Cảnh báo / lỗi khi tạo lịch — gộp vào nút (i), bấm mới hiện chi tiết. */}
+      {(() => {
+        const hasValErr = !validation.valid && schedule.shifts.length > 0;
+        const hasError = Boolean(genError) || hasValErr;
+        const hasWarn = peakGaps.length > 0;
+        if (!hasError && !hasWarn) return null;
+        const headline = genError
+          ? "Không tạo được lịch làm việc."
+          : hasValErr
+            ? `Lịch có ${validation.errors.length} lỗi kiểm tra.`
+            : `Lịch có cảnh báo ở ${peakGaps.length} ngày (giờ cao điểm).`;
+        const boxCls = hasError
+          ? "bg-rose-50 border-rose-200 text-rose-700"
+          : "bg-amber-50 border-amber-200 text-amber-900";
+        return (
+          <div className={`mb-3 rounded border text-sm px-3 py-2 ${boxCls}`}>
+            <div className="flex items-center justify-between gap-3">
+              <span>{hasError ? "⚠ " : ""}{headline}</span>
+              <button
+                onClick={() => setShowIssues((v) => !v)}
+                aria-label="Chi tiết cảnh báo / lỗi"
+                aria-expanded={showIssues}
+                className="shrink-0 font-bold text-rose-600 hover:text-rose-800 underline"
+              >
+                (i)
+              </button>
+            </div>
+            {showIssues && (
+              <div className="mt-2 space-y-2 border-t border-black/10 pt-2">
+                {genError && <div className="whitespace-pre-wrap">{genError}</div>}
+                {hasValErr && (
+                  <div>
+                    <div className="font-medium mb-0.5">Lỗi kiểm tra ({validation.errors.length}):</div>
+                    <ul className="list-disc pl-5 space-y-0.5 max-h-48 overflow-auto">
+                      {validation.errors.slice(0, 60).map((e, i) => (
+                        <li key={i}>{e.message}</li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+                {hasWarn && (
+                  <div>
+                    <div className="font-medium mb-0.5">Cảnh báo giờ cao điểm ({peakGaps.length} ngày):</div>
+                    <ul className="list-disc pl-5 space-y-0.5 max-h-48 overflow-auto">
+                      {peakGaps.slice(0, 60).map((d) => (
+                        <li key={d.date}>
+                          {d.date.slice(8, 10)}.{d.date.slice(5, 7)} —{" "}
+                          {d.peaks
+                            .filter((p) => !p.ok)
+                            .map((p) =>
+                              p.minStaff < p.required
+                                ? `${p.label} thiếu ${p.minStaff}/${p.required} người`
+                                : `${p.label} thừa ${p.maxStaff}/${p.allowed}`,
+                            )
+                            .join(" · ")}{" "}
+                          <span className="opacity-70">({d.shiftCount} ca, {d.paidHours}h)</span>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        );
+      })()}
 
       {/* Chú thích (bảng tháng và bảng tuần dùng chung lưới) */}
       {view !== "day" && (
@@ -390,6 +456,10 @@ export function ScheduleTab({ store }: { store: UseScheduleReturn }) {
               />
               <SummaryRow label="Ca sáng" dates={gridDates} value={(d) => String(dayStats.get(d)!.early)} />
               <SummaryRow label="Ca tối" dates={gridDates} value={(d) => String(dayStats.get(d)!.late)} />
+              <SummaryRow label="Ca đêm" dates={gridDates} value={(d) => {
+                const n = dayStats.get(d)!.night;
+                return n > 0 ? String(n) : "";
+              }} />
             </tfoot>
           </table>
         </div>

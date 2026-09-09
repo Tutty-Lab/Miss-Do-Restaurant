@@ -11,19 +11,20 @@ describe("splitTargetHours – Vollzeit", () => {
       const parts = splitTargetHours(h, "VOLLZEIT");
       expect(sum(parts)).toBe(h);
       for (const p of parts) expect(p).toBeGreaterThanOrEqual(3);
-      for (const p of parts) expect(p).toBeLessThanOrEqual(9);
+      for (const p of parts) expect(p).toBeLessThanOrEqual(6);
     }
   });
 
-  it("bevorzugt die längste Schicht (9 h) und damit möglichst wenige Dienste", () => {
-    // 176 = 19×9 + 5
-    expect(splitTargetHours(176, "VOLLZEIT")).toEqual([...Array(19).fill(9), 5]);
+  it("bevorzugt kurze Dienste (max 6 h) mit möglichst wenigen Diensten", () => {
+    // 90 = 15×6
+    expect(splitTargetHours(90, "VOLLZEIT")).toEqual([...Array(15).fill(6)]);
     // Jedes Ziel wird mit der kleinstmöglichen Schichtzahl abgedeckt:
-    // aufgerundet targetHours/9 Dienste.
-    for (const h of [176, 178, 179, 180]) {
+    // aufgerundet targetHours/6 Dienste.
+    for (const h of [115, 120, 128, 90]) {
       const parts = splitTargetHours(h, "VOLLZEIT");
       expect(sum(parts)).toBe(h);
-      expect(parts.length).toBe(Math.ceil(h / 9));
+      expect(parts.length).toBe(Math.ceil(h / 6));
+      expect(Math.max(...parts)).toBeLessThanOrEqual(6);
     }
   });
 });
@@ -41,6 +42,7 @@ describe("splitTargetHours – Teilzeit", () => {
   it("55 = 11×5, 80 = 16×5, 79 = 11×5 + 4×6", () => {
     expect(splitTargetHours(55, "TEILZEIT")).toEqual(Array(11).fill(5));
     expect(splitTargetHours(80, "TEILZEIT")).toEqual(Array(16).fill(5));
+    // 79: wenige Dienste sind billiger (Basiskosten je Dienst) => 11×5 + 4×6.
     const s79 = splitTargetHours(79, "TEILZEIT").slice().sort((a, b) => a - b);
     expect(s79).toEqual([...Array(11).fill(5), ...Array(4).fill(6)].sort((a, b) => a - b));
   });

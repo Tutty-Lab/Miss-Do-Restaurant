@@ -87,8 +87,21 @@ export type Employee = {
    * Fehlt das Feld, begrenzt nur die Sechs-Tage-Regel des Gesetzes.
    */
   maxDaysPerWeek?: number;
-  /** Legacy monthly cleaning targets; retained for previously saved schedules. */
+  /**
+   * Monatliche Abend-Reinigung nach 20:00 (Nachtzuschlag) in Minuten.
+   *
+   * Eigener Topf, ZUSÄTZLICH zum Tages-Soll (targetMinutes): der Betrieb gibt je
+   * Person einen Monatswert vor ("A macht 10 h Abend, B 12 h ..."). Der Scheduler
+   * streut die Summe auf ein paar zufällige Arbeitstage (zufällige Länge je
+   * Abend, Ende meist 21–23 Uhr) – siehe planNightWork in scheduler.ts. Fehlt/0
+   * = keine Abendreinigung.
+   */
   nightMinutes?: number;
+  /**
+   * Monatliche Sonntagsreinigung (Sonntagszuschlag) in Minuten, ebenfalls
+   * ZUSÄTZLICH zum Tages-Soll. Wird auf ein paar der geschlossenen Sonntage
+   * gestreut (planSundayWork in scheduler.ts). Fehlt/0 = keine Sonntagsarbeit.
+   */
   sundayMinutes?: number;
 };
 
@@ -123,16 +136,17 @@ export type Schedule = {
   month: number;
   /** Arbeitszeit-Fenster (giờ làm) je Wochentag + Feiertag. */
   workHours: WorkHoursConfig;
-  /** Missing/1 = legacy separate targets; 2 = all paid work counts toward target. */
-  surchargeModelVersion?: 1 | 2;
+  /**
+   * Modell für Nacht-/Sonntagsarbeit.
+   *  - Fehlt/1: alte Stände (globale Sonntagsreinigung, Schließer bis 22:00).
+   *  - 3: je Person eigener Monats-Topf für Abend (nach 20:00) und Sonntag,
+   *       zusätzlich zum Tages-Soll – siehe Employee.nightMinutes/sundayMinutes.
+   * (2 war ein Zwischenschritt: alle bezahlte Zeit gegen das Soll, Zuschläge aus
+   *  den Zeiten. Bleibt als Zahl erhalten, wird aber nicht mehr erzeugt.)
+   */
+  surchargeModelVersion?: 1 | 2 | 3;
   /** Zuschläge in Prozent (Nacht nach 20:00, Sonntag). Fehlt = 0/0. */
   surchargeConfig?: SurchargeConfig;
-  /**
-   * Bezahlte Reinigungsminuten je geschlossenem Sonntag (ein Dienst pro Sonntag,
-   * reihum vergeben). 0/fehlt = keine Sonntagsreinigung. Zählt gegen das
-   * Monats-Soll der eingeteilten Person und bekommt den Sonntagszuschlag.
-   */
-  sundayCleaningMinutes?: number;
   /** Ausnahmen für einzelne Daten (geschlossen / abweichende Zeiten). */
   dateOverrides: DateOverride[];
   employees: Employee[];

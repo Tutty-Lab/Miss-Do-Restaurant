@@ -21,8 +21,6 @@ import {
 } from "../lib/openSundays";
 import { publicHolidayNames } from "../lib/holidays";
 import { isoLabel } from "../lib/shiftOps";
-import { normalizeSurchargeConfig } from "../lib/zuschlaege";
-import { DEFAULT_SUNDAY_CLEANING_MINUTES } from "../lib/scheduleDefaults";
 
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return (
@@ -366,8 +364,8 @@ function OpenSundaysSection({
 
 export function SettingsTab({ store }: { store: UseScheduleReturn }) {
   const { schedule, updateMeta, upsertOverride, removeOverride , changePassword, hasOwnPassword } = store;
-  const surcharges = normalizeSurchargeConfig(schedule.surchargeConfig);
-  const years = Array.from({ length: 7 }, (_, i) => new Date().getFullYear() - 1 + i);
+  // Vom laufenden Jahr bis +4 (2026–2030): kein Vorjahr (2025), kein 2031.
+  const years = Array.from({ length: 5 }, (_, i) => new Date().getFullYear() + i);
 
   // ---- Ngày đặc biệt (Ausnahmen) ----
   const monthDates = useMemo(
@@ -550,46 +548,21 @@ export function SettingsTab({ store }: { store: UseScheduleReturn }) {
       <section className="rounded-lg bg-white border border-slate-200 p-4 sm:p-5 shadow-sm">
         <h2 className="text-base font-semibold text-slate-900">Phụ cấp (Zuschläge)</h2>
         <p className="mt-1 text-xs text-slate-500">
-          Giờ sau 20h (T2–T7) và giờ Chủ nhật tính vào định mức tháng. Phụ cấp tính riêng theo %,
-          quy đổi thành giờ thưởng như Thiên Long Việt Phố; không cộng vào giờ thực làm.
+          Giờ làm sau 20h và giờ Chủ nhật đặt riêng cho từng nhân viên ở tab Nhân viên
+          (cộng thêm ngoài giờ định mức). Không tính lương/% ở đây — tờ Stundenzettel chỉ
+          ghi <b>tổng giờ sau 20h</b> và <b>tổng giờ Chủ nhật</b> để nộp.
         </p>
-        <fieldset disabled={store.isLocked} className="mt-3 grid gap-3 sm:grid-cols-3 disabled:opacity-60">
-          <Field label="Nachtzuschlag (%)">
-            <input type="number" min={0} step="any" className={inputClass}
-              value={surcharges.after20Percent}
-              onChange={(e) => updateMeta({ surchargeConfig: normalizeSurchargeConfig({
-                ...surcharges, after20Percent: Number(e.target.value),
-              }) })} />
-          </Field>
-          <Field label="Sonntagszuschlag (%)">
-            <input type="number" min={0} step="any" className={inputClass}
-              value={surcharges.sundayPercent}
-              onChange={(e) => updateMeta({ surchargeConfig: normalizeSurchargeConfig({
-                ...surcharges, sundayPercent: Number(e.target.value),
-              }) })} />
-          </Field>
-          <Field label="Giờ dọn mỗi Chủ nhật">
-            <select className={inputClass}
-              value={schedule.sundayCleaningMinutes ?? DEFAULT_SUNDAY_CLEANING_MINUTES}
-              onChange={(e) => updateMeta({ sundayCleaningMinutes: Number(e.target.value) })}>
-              {Array.from({ length: 9 }, (_, hours) => (
-                <option key={hours} value={hours * 60}>{hours === 0 ? "Không xếp ca dọn CN" : `${hours} giờ`}</option>
-              ))}
-            </select>
-          </Field>
-        </fieldset>
         <p className="mt-3 text-xs text-slate-500">
-          Mặc định 2 giờ/CN, bắt đầu 10h, một người luân phiên; chỉ xếp khi CN đóng cửa.
-          Ngày được đánh dấu nghỉ riêng sẽ không có ca dọn. Đổi giờ dọn cần tạo lại lịch.
-          T2–T7 đặt cuối khung giờ làm là 22h để có một người dọn 20–22h.
+          Khung phục vụ T2–T7 là 9:30–20:00. Việc dọn sau 20h và dọn Chủ nhật được rải
+          ngẫu nhiên ra vài ngày trong tháng theo số giờ của từng người (độ dài ca ngẫu
+          nhiên), nên giờ tan ca lau chùi có thể khác nhau. Đổi số giờ cần tạo lại lịch.
         </p>
-        {schedule.surchargeModelVersion !== 2 && (
+        {schedule.surchargeModelVersion !== undefined && schedule.surchargeModelVersion < 3 && (
           <p className="mt-2 text-xs text-amber-800">
-            Lịch hiện tại dùng định mức dọn cũ. Tạo lại lịch để áp dụng cách tính mới;
-            khung mặc định 9:30–20:00 sẽ đổi thành 9:30–22:00.
+            Lịch hiện tại dùng cách tính dọn dẹp cũ. Tạo lại lịch để áp dụng cách tính mới
+            (giờ CN/đêm theo từng nhân viên).
           </p>
         )}
-        {store.isLocked && <p className="mt-2 text-xs text-amber-800">Mở khóa tháng để sửa phụ cấp.</p>}
       </section>
 
       <OpenSundaysSection

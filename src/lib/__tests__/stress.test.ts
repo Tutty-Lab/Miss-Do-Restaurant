@@ -85,13 +85,14 @@ describe("splitTargetHours: định mức nào chia được", () => {
 });
 
 describe("Scheduler: chạy thử 12 tháng liên tiếp", () => {
-  // Sonntag ist geschlossen -> die Monatskapazität sinkt. Diese Sollwerte sind
-  // in JEDEM Monat 2026 erreichbar (auch im kurzen Februar).
+  // Sonntag ist geschlossen UND Schichten sind höchstens 6 h -> die
+  // Monatskapazität je Person liegt bei ~120–132 h. Diese Sollwerte sind in
+  // JEDEM Monat 2026 erreichbar (auch im kurzen Februar).
   const employees = [
-    mk("VZ1", "VOLLZEIT", 150),
-    mk("VZ2", "VOLLZEIT", 152),
-    mk("VZ3", "VOLLZEIT", 148),
-    mk("VZ4", "VOLLZEIT", 150),
+    mk("VZ1", "VOLLZEIT", 120),
+    mk("VZ2", "VOLLZEIT", 122),
+    mk("VZ3", "VOLLZEIT", 118),
+    mk("VZ4", "VOLLZEIT", 120),
     mk("TZ1", "TEILZEIT", 40),
     mk("TZ2", "TEILZEIT", 55),
     mk("TZ3", "TEILZEIT", 55),

@@ -13,7 +13,6 @@ const sundayCleaners = (month: number) =>
     month,
     workHours: DEFAULT_WORK_HOURS,
     employees: SAMPLE_EMPLOYEES,
-    sundayCleaningMinutes: 120,
   }).filter((s) => s.category === "SUNDAY");
 
 describe("owner-level scheduling safeguards", () => {
@@ -40,33 +39,39 @@ describe("owner-level scheduling safeguards", () => {
     expect(result.errors.some((error) => error.message.includes("quá 6 ngày liên tiếp"))).toBe(true);
   });
 
-  it("continues Sunday cleaning rotation between months", () => {
-    const august = sundayCleaners(8)[0]?.employeeId;
-    const september = sundayCleaners(9)[0]?.employeeId;
-    expect(august).toBeDefined();
-    expect(september).toBeDefined();
-    expect(september).not.toBe(august);
+  it("assigns Sunday cleaning only to people with a Sunday quota, on Sundays", () => {
+    const cleaners = sundayCleaners(8);
+    expect(cleaners.length).toBeGreaterThan(0);
+    const withQuota = new Set(
+      SAMPLE_EMPLOYEES.filter((e) => (e.sundayMinutes ?? 0) > 0).map((e) => e.id),
+    );
+    for (const s of cleaners) {
+      expect(weekdayKeyOf(parseIsoDate(s.date))).toBe("sunday");
+      expect(withQuota.has(s.employeeId)).toBe(true);
+    }
   });
 
-  it("keeps Saturday staffing useful through the afternoon", () => {
+  it("keeps the evening peak (18–20) staffed with three on Saturdays", () => {
     const actualOrder = [
       "ma-1", "ma-2", "ma-5", "ma-6", "ma-7", "ma-9", "ma-10", "ma-15", "ma-11", "ma-14", "ma-16", "ma-17", "ma-19",
     ];
     const employees = actualOrder.map((id) => ({ ...SAMPLE_EMPLOYEES.find((e) => e.id === id)! }));
+    // Nur Do/Fr/Sa möglich (So zu) => bei max 6-h-Schichten passt ein kleineres
+    // Soll; hier geht es nur um die Samstagsbesetzung.
     employees[0].availableWeekdays = ["saturday", "sunday", "friday", "thursday"];
     employees[0].maxDaysPerWeek = 4;
+    employees[0].targetMinutes = 60 * 60;
     const shifts = generateSchedule({
       year: 2026,
       month: 8,
       workHours: DEFAULT_WORK_HOURS,
       employees,
-      sundayCleaningMinutes: 120,
     });
     for (const date of datesOfMonth(2026, 8).filter(
       (d) => weekdayKeyOf(parseIsoDate(d)) === "saturday" && shifts.some((s) => s.date === d),
     )) {
       const day = shifts.filter((s) => s.date === date && s.category !== "SUNDAY");
-      expect(minCoverageOver(day, 16 * 60, 19 * 60), date).toBeGreaterThanOrEqual(3);
+      expect(minCoverageOver(day, 18 * 60, 20 * 60), date).toBeGreaterThanOrEqual(3);
     }
   });
 
@@ -76,7 +81,6 @@ describe("owner-level scheduling safeguards", () => {
       month: 8,
       workHours: DEFAULT_WORK_HOURS,
       employees: SAMPLE_EMPLOYEES,
-      sundayCleaningMinutes: 120,
     });
     for (const date of datesOfMonth(2026, 8)) {
       const day = shifts.filter((s) => s.date === date && s.category !== "SUNDAY");

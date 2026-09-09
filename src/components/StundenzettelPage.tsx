@@ -9,7 +9,7 @@ import { minutesToDecimalHours, minutesToTime } from "../lib/time";
 import { MONTH_NAMES_DE } from "../lib/dateFormat";
 import { publicHolidayNames } from "../lib/holidays";
 import { format } from "date-fns";
-import { calculateZuschlaege, timesheetParts } from "../lib/zuschlaege";
+import { zuschlagTotals, timesheetParts } from "../lib/zuschlaege";
 import { employmentLabelDe } from "../lib/employment";
 
 // Deutscher Monats-Titel für das offizielle Dokument.
@@ -44,7 +44,7 @@ export function StundenzettelPage({
   const extraLines = rows.reduce((total, date) =>
     total + Math.max(0, (byDate.get(date) ?? []).flatMap(timesheetParts).length - 1), 0);
   const totalMinutes = shownShifts.reduce((sum, s) => sum + s.paidMinutes, 0);
-  const surcharges = calculateZuschlaege(shownShifts, schedule.surchargeConfig);
+  const surcharges = zuschlagTotals(shownShifts);
   const holidayNames = publicHolidayNames(schedule.year);
   const closedByDate = new Map(
     schedule.dateOverrides.filter((o) => o.closed).map((o) => [o.date, o] as const),
@@ -154,18 +154,15 @@ export function StundenzettelPage({
       </div>
 
       <div className="mt-3 border-t border-slate-300 pt-2 text-[11px]">
-        <div className="font-semibold mb-1">Zuschläge</div>
+        <div className="font-semibold mb-1">Zuschläge (nur Stundensumme)</div>
         <div className="grid grid-cols-2 gap-3">
           <div>Nachtzuschlag (Mo–Sa, ab 20:00)<br />
-            {minutesToDecimalHours(surcharges.after20Minutes)} h × {surcharges.after20Percent.toLocaleString("de-DE")}%
-            {" = +"}{minutesToDecimalHours(surcharges.after20BonusMinutes)} h
+            <span className="font-semibold">{minutesToDecimalHours(surcharges.after20Minutes)} h</span>
           </div>
-          <div>Sonntagszuschlag<br />
-            {minutesToDecimalHours(surcharges.sundayMinutes)} h × {surcharges.sundayPercent.toLocaleString("de-DE")}%
-            {" = +"}{minutesToDecimalHours(surcharges.sundayBonusMinutes)} h
+          <div>Sonntagszuschlag (Sonntag)<br />
+            <span className="font-semibold">{minutesToDecimalHours(surcharges.sundayMinutes)} h</span>
           </div>
         </div>
-        <div className="mt-1 font-semibold">Zuschlagsstunden gesamt: +{minutesToDecimalHours(surcharges.totalBonusMinutes)} h</div>
       </div>
 
       <div className="mt-4 grid grid-cols-3 gap-8 text-[11px]">

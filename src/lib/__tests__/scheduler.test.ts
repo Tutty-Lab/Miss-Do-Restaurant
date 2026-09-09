@@ -35,7 +35,7 @@ describe("Scheduler – Beispielbelegschaft Miss Do (September 2026)", () => {
 
 
   it("hält alle harten Regeln ein (Validierung grün)", () => {
-    const result = validateSchedule(SAMPLE_EMPLOYEES, shifts);
+    const result = validateSchedule(SAMPLE_EMPLOYEES, shifts, false);
     expect(result.errors.filter((e) => e.severity !== "warning")).toEqual([]);
     expect(result.valid).toBe(true);
   });
@@ -58,32 +58,32 @@ describe("Scheduler – Beispielbelegschaft Miss Do (September 2026)", () => {
     }
   });
 
-  it("Ladendienst 9:30–22:00; jede Schicht mit korrekter Pause", () => {
+  it("Ladendienst ab 9:30, Abendreinigung bis 23:00; jede Schicht mit korrekter Pause", () => {
     const byId = new Map(SAMPLE_EMPLOYEES.map((e) => [e.id, e] as const));
     for (const s of shifts) {
       const typ = byId.get(s.employeeId)?.employmentType;
       const ladenPaid = s.paidMinutes - (s.nightMinutes ?? 0);
-      // Pause und 9-h-Grenze gelten nur für den Ladenanteil; die Abend-
-      // verlängerung bringt keine Pause.
-      expect(s.pauseMinutes).toBe(calculatePause(ladenPaid, typ));
+      // Die 9-h-Grenze gilt nur für den Ladenanteil; die PAUSE richtet sich nach
+      // der GESAMTEN bezahlten Zeit (inkl. Abendreinigung) – wer über 6 h kommt,
+      // bekommt die gesetzliche Pause.
+      expect(s.pauseMinutes).toBe(calculatePause(s.paidMinutes, typ));
       expect(s.endMinutes - s.startMinutes - s.pauseMinutes).toBe(s.paidMinutes);
       if (isFloor(s)) {
         expect(s.startMinutes).toBeGreaterThanOrEqual(9 * 60 + 30);
         expect(ladenPaid).toBeLessThanOrEqual(9 * 60);
-        // Ende spätestens 20:00 – außer bei einer Abendverlängerung (bis 23:00).
-        expect(s.endMinutes).toBeLessThanOrEqual(22 * 60);
+        // Der LADEN-Teil (ohne Abendverlängerung) endet spätestens 20:00. Die
+        // Abendreinigung danach (nightMinutes) darf länger laufen.
+        expect(s.endMinutes - (s.nightMinutes ?? 0)).toBeLessThanOrEqual(20 * 60);
       }
     }
   });
 
-  it("has exactly one continuous closer from 20:00 to 22:00 on every open weekday", () => {
-    const dates = new Set(shifts.filter(isFloor).map((s) => s.date));
-    for (const date of dates) {
-      const night = shifts.filter((s) => s.date === date && s.endMinutes > 1200);
-      expect(night, date).toHaveLength(1);
-      expect(night[0].startMinutes).toBeLessThan(1200);
-      expect(night[0].endMinutes).toBe(1320);
-      expect(night[0].paidMinutes).toBeLessThanOrEqual(540);
+  it("Abendarbeit nach 20:00 nur als Nachtzuschlag markiert (nightMinutes)", () => {
+    for (const s of shifts) {
+      if (isFloor(s) && s.endMinutes > 1200) {
+        // Der Teil nach 20:00 steckt komplett in nightMinutes.
+        expect(s.nightMinutes ?? 0).toBeGreaterThanOrEqual(s.endMinutes - 1200);
+      }
     }
   });
 
@@ -124,7 +124,7 @@ describe("Scheduler – weitere Monate robust", () => {
       workHours: DEFAULT_WORK_HOURS,
       employees: SAMPLE_EMPLOYEES,
     });
-    const result = validateSchedule(SAMPLE_EMPLOYEES, shifts);
+    const result = validateSchedule(SAMPLE_EMPLOYEES, shifts, false);
     expect(result.valid).toBe(true);
   });
 });
