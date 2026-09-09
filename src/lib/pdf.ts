@@ -30,8 +30,8 @@ export function safeFileName(text: string): string {
  * und stößt den Download an. Die Elemente müssen sichtbar gerendert sein –
  * display:none kann html2canvas nicht aufnehmen (deshalb die Offscreen-Bühne).
  */
-export async function elementsToPdf(elements: HTMLElement[], filename: string): Promise<void> {
-  if (elements.length === 0) return;
+async function buildPdf(elements: HTMLElement[]): Promise<jsPDF | null> {
+  if (elements.length === 0) return null;
 
   const doc = new jsPDF({ unit: "mm", format: "a4", orientation: "portrait" });
 
@@ -74,7 +74,58 @@ export async function elementsToPdf(elements: HTMLElement[], filename: string): 
     );
   }
 
+  return doc;
+}
+
+export async function elementsToPdf(elements: HTMLElement[], filename: string): Promise<void> {
+  const doc = await buildPdf(elements);
+  if (!doc) return;
   await deliver(doc.output("blob"), filename);
+}
+
+/**
+ * Druckt die Elemente, indem daraus ERST eine PDF gebaut und DIESE gedruckt
+ * wird (verstecktes iframe). Der entscheidende Unterschied zu window.print()
+ * auf dem HTML: gedruckt wird PDF-Inhalt, deshalb fügt der Browser KEINE
+ * Kopf-/Fußzeile hinzu – keine .vercel.app-URL, keine Seitenzahl „1/28", kein
+ * Druckdatum. Auf dem Papier steht exakt der Stundenzettel.
+ */
+export async function printElementsAsPdf(elements: HTMLElement[]): Promise<void> {
+  const doc = await buildPdf(elements);
+  if (!doc) return;
+
+  // autoPrint hängt dem PDF eine OpenAction an, die beim Öffnen im Viewer den
+  // Druckdialog auslöst. Das ist der zuverlässige Weg für PDF-Druck: der
+  // `load`-Event eines iframes feuert bei PDF-Blobs NICHT verlässlich, ein
+  // iframe.contentWindow.print() liefe also ins Leere.
+  doc.autoPrint();
+  const url = URL.createObjectURL(doc.output("blob"));
+
+  const iframe = document.createElement("iframe");
+  iframe.setAttribute("aria-hidden", "true");
+  iframe.style.cssText =
+    "position:fixed;right:0;bottom:0;width:1px;height:1px;border:0;opacity:0;";
+  iframe.src = url;
+  document.body.appendChild(iframe);
+
+  // Als Rückfall (Browser, die die OpenAction im iframe ignorieren) nach kurzer
+  // Zeit zusätzlich contentWindow.print() versuchen. Feuert die OpenAction schon,
+  // ist das höchstens ein zweiter Dialog – harmlos.
+  window.setTimeout(() => {
+    try {
+      iframe.contentWindow?.focus();
+      iframe.contentWindow?.print();
+    } catch {
+      /* Manche Browser drucken PDF im iframe nicht – dann bleibt „Xuất PDF". */
+    }
+  }, 700);
+
+  // Erst spät aufräumen: solange der Druckdialog offen ist, muss das Dokument
+  // existieren. Nach 60 s ist das sicher bestätigt oder abgebrochen.
+  window.setTimeout(() => {
+    iframe.remove();
+    URL.revokeObjectURL(url);
+  }, 60_000);
 }
 
 /**

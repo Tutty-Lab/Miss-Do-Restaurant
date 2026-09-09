@@ -4,7 +4,7 @@ import type { UseScheduleReturn } from "../hooks/useSchedule";
 import type { Employee } from "../types";
 import { StundenzettelPage } from "./StundenzettelPage";
 import { SchedulePrintPage, type SchedulePrintLayout } from "./SchedulePrintPage";
-import { elementsToPdf, safeFileName } from "../lib/pdf";
+import { elementsToPdf, printElementsAsPdf, safeFileName } from "../lib/pdf";
 import { weeksOfMonth } from "../lib/weeks";
 import { datesOfMonth } from "../lib/demand";
 import { monthLabel } from "../lib/shiftOps";
@@ -34,9 +34,11 @@ export function StundenzettelTab({ store }: { store: UseScheduleReturn }) {
     [schedule.year, schedule.month],
   );
 
-  // Druck-/PDF-Bühne.
-  const [printList, setPrintList] = useState<Employee[] | null>(null);
-  const [scheduleRange, setScheduleRange] = useState<ScheduleRange | null>(null);
+  // Druck-/PDF-Bühne. Drucken UND Speichern gehen über DIESELBE Offscreen-Bühne
+  // (pdfStage): erst wird daraus eine PDF gebaut, dann entweder gedruckt oder
+  // geteilt/gespeichert. So kommt auf Papier exakt der Stundenzettel – ohne die
+  // Browser-Kopf-/Fußzeile (URL, Seitenzahl, Datum), die window.print() auf dem
+  // HTML anhängt.
   const [pdfList, setPdfList] = useState<Employee[] | null>(null);
   const [pdfSchedule, setPdfSchedule] = useState<ScheduleRange | null>(null);
   const [pdfBusy, setPdfBusy] = useState(false);
@@ -63,17 +65,29 @@ export function StundenzettelTab({ store }: { store: UseScheduleReturn }) {
   const employeeIds = who === "all" ? undefined : [who];
   const whoTag = who === "all" ? "tat_ca" : safeFileName(previewEmployee?.name ?? who);
 
-  // Vùng in phải được render TRƯỚC khi gọi print, và print phải nằm trong cùng
-  // thao tác chạm (mobile chặn print ngoài gesture). flushSync render đồng bộ.
-  function doPrint(list: Employee[], sz?: { dates?: string[]; label?: string }) {
-    if (list.length === 0) return;
+  // In = dựng PDF từ pdfStage rồi in CHÍNH PDF đó (printElementsAsPdf). Nhờ vậy
+  // tờ in ra đúng bằng bản Stundenzettel, không dính URL/số trang/ngày do trình
+  // duyệt chèn khi in HTML.
+  async function doPrint(list: Employee[], sz?: { dates?: string[]; label?: string }) {
+    if (list.length === 0 || pdfBusy) return;
+    setPdfBusy(true);
     flushSync(() => {
-      setScheduleRange(null);
+      setPdfSchedule(null);
       setSzDates(sz?.dates);
       setSzLabel(sz?.label);
-      setPrintList(list);
+      setPdfList(list);
     });
-    window.print();
+    try {
+      const pages = Array.from(
+        pdfStage.current?.querySelectorAll<HTMLElement>(".stundenzettel-page") ?? [],
+      );
+      await printElementsAsPdf(pages);
+    } catch (err) {
+      alert(`Không in được: ${err instanceof Error ? err.message : String(err)}`);
+    } finally {
+      setPdfList(null);
+      setPdfBusy(false);
+    }
   }
 
   /**
@@ -81,14 +95,25 @@ export function StundenzettelTab({ store }: { store: UseScheduleReturn }) {
    * danach im Laden und muss mit dem Stand im System übereinstimmen. Der
    * Monatsausdruck ist nur eine Übersicht und sperrt nichts.
    */
-  function printSchedule(range: ScheduleRange) {
-    if (range.dates.length === 0) return;
+  async function printSchedule(range: ScheduleRange) {
+    if (range.dates.length === 0 || pdfBusy) return;
+    setPdfBusy(true);
     flushSync(() => {
-      setPrintList(null);
-      setScheduleRange(range);
+      setPdfList(null);
+      setPdfSchedule(range);
     });
-    window.print();
-    if (range.weekStart) markWeekPrinted(range.weekStart);
+    try {
+      const pages = Array.from(
+        pdfStage.current?.querySelectorAll<HTMLElement>(".stundenzettel-page") ?? [],
+      );
+      await printElementsAsPdf(pages);
+      if (range.weekStart) markWeekPrinted(range.weekStart);
+    } catch (err) {
+      alert(`Không in được: ${err instanceof Error ? err.message : String(err)}`);
+    } finally {
+      setPdfSchedule(null);
+      setPdfBusy(false);
+    }
   }
 
   /**
@@ -175,16 +200,16 @@ export function StundenzettelTab({ store }: { store: UseScheduleReturn }) {
 
   function onPrint() {
     if (what === "stundenzettel") {
-      doPrint(chosenEmployees);
+      void doPrint(chosenEmployees);
       return;
     }
     if (what.startsWith("sz-")) {
       const sz = szWeekFor(what.slice(3));
-      if (sz) doPrint(chosenEmployees, sz);
+      if (sz) void doPrint(chosenEmployees, sz);
       return;
     }
     const range = scheduleRangeFor(what);
-    if (range) printSchedule(range);
+    if (range) void printSchedule(range);
   }
 
   function onPdf() {
@@ -205,11 +230,6 @@ export function StundenzettelTab({ store }: { store: UseScheduleReturn }) {
     const suffix = what === "month" ? "thang" : `tuan_${what}`;
     void doPdfSchedule(range, `Dienstplan_${whoTag}_${suffix}_${monthTag}.pdf`);
   }
-
-  // Vùng in KHÔNG được dọn theo sự kiện "afterprint": trên Android sự kiện đó
-  // bắn ra ngay khi gọi window.print(), trước lúc trình duyệt dựng xong trang
-  // — nội dung bị xoá mất và tờ in ra trắng. Vùng này vốn đã ẩn trên màn hình
-  // nên cứ để nguyên; lần in sau sẽ ghi đè bằng danh sách mới.
 
   if (schedule.employees.length === 0) {
     return (
@@ -377,30 +397,7 @@ export function StundenzettelTab({ store }: { store: UseScheduleReturn }) {
         )}
       </div>
 
-      {/* Vùng in ẩn: hoặc các tờ chấm công, hoặc lịch làm việc */}
-      <div className="print-area">
-        {scheduleRange ? (
-          <SchedulePrintPage
-            schedule={schedule}
-            dates={scheduleRange.dates}
-            title={scheduleRange.title}
-            layout={scheduleRange.layout}
-            employeeIds={scheduleRange.employeeIds}
-          />
-        ) : (
-          (printList ?? []).map((emp) => (
-            <StundenzettelPage
-              key={emp.id}
-              schedule={schedule}
-              employee={emp}
-              dates={szDates}
-              periodLabel={szLabel}
-            />
-          ))
-        )}
-      </div>
-
-      {/* Sân khấu ngoài màn hình – chỉ có nội dung trong lúc tạo PDF */}
+      {/* Sân khấu ngoài màn hình – dùng CHUNG cho In và Xuất PDF */}
       <div ref={pdfStage} aria-hidden="true" className="pdf-stage no-print">
         {pdfSchedule ? (
           <SchedulePrintPage
