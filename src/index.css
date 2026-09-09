@@ -52,6 +52,29 @@ body {
   pointer-events: none;
 }
 
+/* Tabellengitter, das AUCH im PDF ankommt. html2canvas (PDF-Export) zeichnet
+   bei border-collapse:collapse die Linien ZWISCHEN den Zellen nicht – die PDF
+   kam ganz ohne Gitter heraus (gemessen: 0 senkrechte, 0 waagerechte Linien).
+   Mit border-collapse:separate und je Zelle einer rechten + unteren Linie (plus
+   Außenkante oben/links) rendert html2canvas das volle Gitter (7 Spalten- und
+   ~32 Zeilenlinien). Gilt für Bildschirm, Druck und PDF gleichermaßen. */
+.miss-do-timesheet table {
+  border-collapse: separate !important;
+  border-spacing: 0 !important;
+}
+.miss-do-timesheet th,
+.miss-do-timesheet td {
+  border: 0 solid #94a3b8; /* slate-400 */
+  border-right-width: 1px;
+  border-bottom-width: 1px;
+}
+.miss-do-timesheet thead th {
+  border-top-width: 1px;
+}
+.miss-do-timesheet tr > :first-child {
+  border-left-width: 1px;
+}
+
 /* Leave room for the separate night lines and surcharge totals on one A4 page. */
 .miss-do-timesheet table {
   font-size: 10px;
@@ -125,12 +148,12 @@ body {
     -webkit-print-color-adjust: exact !important;
     print-color-adjust: exact !important;
   }
-  .miss-do-timesheet table {
-    border-collapse: collapse !important;
-  }
+  /* Nur die Linien-FARBE kräftigen; Breite/Seiten kommen aus dem Basis-Gitter
+     oben (rechts + unten je Zelle, Außenkante oben/links). Ein voller border-
+     Shorthand würde mit border-collapse:separate doppelte Linien zeichnen. */
   .miss-do-timesheet th,
   .miss-do-timesheet td {
-    border: 0.6pt solid #334155 !important; /* slate-700: klares Gitter im Druck */
+    border-color: #334155 !important; /* slate-700: klares Gitter im Druck */
   }
   .miss-do-timesheet thead tr,
   .miss-do-timesheet tfoot tr {
