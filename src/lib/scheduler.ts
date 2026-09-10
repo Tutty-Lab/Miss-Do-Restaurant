@@ -2359,18 +2359,64 @@ export function generateSchedule(input: GenerateInput): Shift[] {
   if (input.seed !== undefined) return generateScheduleOnce(input);
   const base = deriveSeed(input);
   let lastErr: unknown;
-  // 8 Anläufe: die erste Runde nutzt den kanonischen Seed (unverändertes
-  // Ergebnis, wenn er schon aufgeht). Gleiche Eingabe -> gleiche Seed-Folge ->
-  // reproduzierbar. ~80 % der Seeds lösen enge Fälle, 8 Versuche machen ein
-  // Scheitern bei lösbaren Fällen praktisch unmöglich.
+  let best: { shifts: Shift[]; gaps: number } | null = null;
+  // 8 Anläufe: die erste Runde nutzt den kanonischen Seed. Unter den Läufen, die
+  // aufgehen, wird der mit den WENIGSTEN Stoßzeit-Lücken gewählt (nicht bloss der
+  // erste): ~75 % der Seeds decken enge Monate ganz ab, der kanonische Seed traf
+  // manchmal eine unnötige Lücke. Bei 0 Lücken sofort Schluss – dann läuft ein
+  // sauberer Monat wie bisher in EINEM Versuch (reproduzierbar, gleiche Eingabe
+  // -> gleiche Seed-Folge). Werfen alle Seeds, wird der letzte Fehler gemeldet.
   for (let k = 0; k < 8; k++) {
+    let shifts: Shift[];
     try {
-      return generateScheduleOnce({ ...input, seed: k === 0 ? base : `${base}~r${k}` });
+      shifts = generateScheduleOnce({ ...input, seed: k === 0 ? base : `${base}~r${k}` });
     } catch (err) {
       lastErr = err;
+      continue;
     }
+    const gaps = peakGapDays(shifts, input);
+    if (gaps === 0) return shifts;
+    if (best === null || gaps < best.gaps) best = { shifts, gaps };
   }
+  if (best !== null) return best.shifts;
   throw lastErr;
+}
+
+/**
+ * Wie viele TAGE verfehlen mindestens eine Stoßzeit (Unterbesetzung)? Dient nur
+ * der Seed-Auswahl oben – der greedy Lauf selbst kann eine Lücke lassen, ein
+ * anderer Seed vermeidet sie oft. Zählt Ladendienste; Nacht-/Sonntagsdienste
+ * liegen ausserhalb der Stoßzeiten und stören die Zählung nicht.
+ */
+function peakGapDays(shifts: Shift[], input: GenerateInput): number {
+  const holidays = input.holidays ?? publicHolidays(input.year);
+  const overrides = input.overrides ?? {};
+  const byDate = new Map<string, Shift[]>();
+  for (const s of shifts) {
+    const list = byDate.get(s.date);
+    if (list) list.push(s);
+    else byDate.set(s.date, [s]);
+  }
+  let bad = 0;
+  for (const [date, onDay] of byDate) {
+    const day = resolveDay(input.workHours, date, holidays, overrides);
+    if (day.closed) continue;
+    let gap = false;
+    for (const peak of PEAK_WINDOWS_BY_WEEKDAY[effectiveWeekdayKey(date, holidays)]) {
+      const from = Math.max(peak.startMinutes, day.window.startMinutes);
+      const to = Math.min(peak.endMinutes, day.window.endMinutes);
+      for (let t = from; t < to; t++) {
+        const staff = onDay.filter((s) => s.startMinutes <= t && s.endMinutes > t).length;
+        if (staff < peak.minStaff) {
+          gap = true;
+          break;
+        }
+      }
+      if (gap) break;
+    }
+    if (gap) bad++;
+  }
+  return bad;
 }
 
 /** Der kanonische Seed aus den Eingabedaten (wenn der Aufrufer keinen setzt). */

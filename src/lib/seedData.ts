@@ -71,14 +71,11 @@ export const SEED_MONTHS: SeedMonth[] = [
   // die 3-Köpfe-Spitzen – ein bekannter Engpass eines mageren Monats, kein
   // Planungsfehler; das Dashboard weist diese Tage aus. Volle Monate (z. B. 14
   // Kräfte) decken die Spitzen dagegen komplett.
-  { year: 2026, month: 7, label: "Juli 2026", employees: JULI.map((e) => ({ ...e })), maxPeakGaps: 20 },
-  // August: nur eine Minijob-Kraft fehlt, aber weil hohe Monats-Soll (auch bei
-  // Teilzeit, needHours >= 5) bewusst auf viele kurze 5–6-h-Tage verteilt werden
-  // statt auf wenige lange Rückgrat-Dienste, findet der greedy Lauf an EINEM Tag
-  // die 3-Köpfe-Spitze nicht mehr. Die volle 14er-Belegschaft (reale Daten) deckt
-  // alle Spitzen lückenlos; dieser eine Tag ist die bekannte Heuristik-Schwäche
-  // eines knapp besetzten Fixtures, kein Planungsfehler.
-  { year: 2026, month: 8, label: "August 2026", employees: AUGUST.map((e) => ({ ...e })), maxPeakGaps: 1 },
+  { year: 2026, month: 7, label: "Juli 2026", employees: JULI.map((e) => ({ ...e })), maxPeakGaps: 12 },
+  // August: nur eine Minijob-Kraft fehlt – mit der Seed-Auswahl (der Lauf mit den
+  // wenigsten Lücken gewinnt) deckt der Plan alle Spitzen LÜCKENLOS ab. Kein
+  // maxPeakGaps nötig.
+  { year: 2026, month: 8, label: "August 2026", employees: AUGUST.map((e) => ({ ...e })) },
 ];
 
 
