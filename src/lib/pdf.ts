@@ -84,6 +84,38 @@ export async function elementsToPdf(elements: HTMLElement[], filename: string): 
 }
 
 /**
+ * Baut aus den Elementen eine PDF und öffnet sie zum DRUCKEN in einem neuen Tab
+ * (autoPrint = der Druckdialog geht von selbst auf). Entscheidend: gedruckt wird
+ * PDF-Inhalt, deshalb setzt der Browser KEINE Kopf-/Fußzeile (keine .vercel.app-
+ * URL, kein Datum, keine Seitenzahl) – anders als window.print() auf dem HTML.
+ * Und alle Blätter kommen auf einmal (nicht nur das erste wie im 1px-iframe).
+ *
+ * `win` MUSS im Klick-Gesture geöffnet worden sein (window.open(""), sonst
+ * greift der Popup-Blocker). Ist es blockiert/geschlossen, wird die PDF wie beim
+ * „Xuất PDF"-Knopf geteilt/heruntergeladen – dann druckt der Nutzer die Datei.
+ */
+export async function openPdfForPrint(
+  elements: HTMLElement[],
+  win: Window | null,
+  filename: string,
+): Promise<void> {
+  const doc = await buildPdf(elements);
+  if (!doc) {
+    win?.close();
+    return;
+  }
+  doc.autoPrint();
+  const blob = doc.output("blob");
+  if (win && !win.closed) {
+    // Den Blob-URL NICHT sofort widerrufen – der neue Tab lädt ihn erst jetzt.
+    win.location.href = URL.createObjectURL(blob);
+  } else {
+    // Popup blockiert: dann als Datei ausliefern (teilen/herunterladen).
+    await deliver(blob, filename);
+  }
+}
+
+/**
  * PDF ausliefern. Auf dem Handy NICHT einfach herunterladen:
  * iOS Safari ignoriert das download-Attribut und zeigt die PDF stattdessen
  * nur an, statt sie zu speichern. Deshalb zuerst das System-Teilen-Menü
