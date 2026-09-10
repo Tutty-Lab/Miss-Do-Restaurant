@@ -4,7 +4,7 @@ import type { UseScheduleReturn } from "../hooks/useSchedule";
 import type { Employee } from "../types";
 import { StundenzettelPage } from "./StundenzettelPage";
 import { SchedulePrintPage, type SchedulePrintLayout } from "./SchedulePrintPage";
-import { elementsToPdf, openPdfForPrint, safeFileName } from "../lib/pdf";
+import { elementsToPdf, safeFileName } from "../lib/pdf";
 import { weeksOfMonth } from "../lib/weeks";
 import { datesOfMonth } from "../lib/demand";
 import { monthLabel } from "../lib/shiftOps";
@@ -64,69 +64,6 @@ export function StundenzettelTab({ store }: { store: UseScheduleReturn }) {
     who === "all" ? schedule.employees[0] ?? null : chosenEmployees[0] ?? null;
   const employeeIds = who === "all" ? undefined : [who];
   const whoTag = who === "all" ? "tat_ca" : safeFileName(previewEmployee?.name ?? who);
-
-  // In = bauen die PDF aus pdfStage und öffnen sie zum Drucken (openPdfForPrint).
-  // `win` wird im onPrint SYNCHRON (im Klick-Gesture) geöffnet und hier gefüllt –
-  // sonst blockt der Popup-Blocker den neuen Tab.
-  async function doPrint(
-    win: Window | null,
-    list: Employee[],
-    sz?: { dates?: string[]; label?: string },
-  ) {
-    if (list.length === 0 || pdfBusy) {
-      win?.close();
-      return;
-    }
-    setPdfBusy(true);
-    flushSync(() => {
-      setPdfSchedule(null);
-      setSzDates(sz?.dates);
-      setSzLabel(sz?.label);
-      setPdfList(list);
-    });
-    try {
-      const pages = Array.from(
-        pdfStage.current?.querySelectorAll<HTMLElement>(".stundenzettel-page") ?? [],
-      );
-      await openPdfForPrint(pages, win, `Stundenzettel_${whoTag}_${monthTag}.pdf`);
-    } catch (err) {
-      win?.close();
-      alert(`Không in được: ${err instanceof Error ? err.message : String(err)}`);
-    } finally {
-      setPdfList(null);
-      setPdfBusy(false);
-    }
-  }
-
-  /**
-   * Dienstplan drucken. Der Wochen-Ausdruck sperrt den Monat: das Blatt hängt
-   * danach im Laden und muss mit dem Stand im System übereinstimmen. Der
-   * Monatsausdruck ist nur eine Übersicht und sperrt nichts.
-   */
-  async function printSchedule(win: Window | null, range: ScheduleRange) {
-    if (range.dates.length === 0 || pdfBusy) {
-      win?.close();
-      return;
-    }
-    setPdfBusy(true);
-    flushSync(() => {
-      setPdfList(null);
-      setPdfSchedule(range);
-    });
-    try {
-      const pages = Array.from(
-        pdfStage.current?.querySelectorAll<HTMLElement>(".stundenzettel-page") ?? [],
-      );
-      await openPdfForPrint(pages, win, `Dienstplan_${whoTag}_${monthTag}.pdf`);
-      if (range.weekStart) markWeekPrinted(range.weekStart);
-    } catch (err) {
-      win?.close();
-      alert(`Không in được: ${err instanceof Error ? err.message : String(err)}`);
-    } finally {
-      setPdfSchedule(null);
-      setPdfBusy(false);
-    }
-  }
 
   /**
    * PDF: các trang phải được render thật (không display:none) thì html2canvas
@@ -208,33 +145,6 @@ export function StundenzettelTab({ store }: { store: UseScheduleReturn }) {
     const w = weeks.find((x) => x.weekStart === weekStart);
     if (!w) return null;
     return { dates: w.dates, label: `Woche ${w.label}${schedule.year}` };
-  }
-
-  function onPrint() {
-    if (pdfBusy) return;
-    // Tab SYNCHRON im Klick öffnen (sonst Popup-Blocker); der PDF-Bau danach ist
-    // async und füllt ihn. Solange zeigt der Tab einen Hinweis.
-    const win = window.open("", "_blank");
-    if (win) {
-      win.document.write(
-        '<!doctype html><meta charset="utf-8"><title>Đang tạo bản in…</title>' +
-          '<body style="margin:0;font:16px system-ui;color:#334155;display:flex;' +
-          'align-items:center;justify-content:center;height:100vh">Đang tạo bản in, vui lòng đợi…</body>',
-      );
-    }
-    if (what === "stundenzettel") {
-      void doPrint(win, chosenEmployees);
-      return;
-    }
-    if (what.startsWith("sz-")) {
-      const sz = szWeekFor(what.slice(3));
-      if (sz) void doPrint(win, chosenEmployees, sz);
-      else win?.close();
-      return;
-    }
-    const range = scheduleRangeFor(what);
-    if (range) void printSchedule(win, range);
-    else win?.close();
   }
 
   function onPdf() {
@@ -323,13 +233,6 @@ export function StundenzettelTab({ store }: { store: UseScheduleReturn }) {
             <div className="flex items-center gap-2">
               <button
                 disabled={pdfBusy || !hasSchedule}
-                onClick={onPrint}
-                className="rounded border border-slate-300 bg-white px-4 py-2 text-sm hover:bg-slate-50 disabled:opacity-40"
-              >
-                🖨 In
-              </button>
-              <button
-                disabled={pdfBusy || !hasSchedule}
                 onClick={onPdf}
                 className="rounded bg-slate-900 px-4 py-2 text-sm font-medium text-white hover:bg-slate-700 active:bg-slate-800 disabled:opacity-40"
               >
@@ -348,9 +251,10 @@ export function StundenzettelTab({ store }: { store: UseScheduleReturn }) {
           <p className="mt-2 text-xs text-slate-500">
             <b>Bảng chấm công (Stundenzettel)</b> theo mẫu tiếng Đức để nộp — một tờ mỗi người, chọn
             cả tháng hoặc từng tuần. <b>Lịch làm việc</b> là lịch treo ở quán (cả tháng hoặc từng
-            tuần, cho cả quán hoặc một người). <b>In lịch một tuần sẽ khóa lịch tháng</b> để bản
-            treo luôn khớp với hệ thống. Xuất PDF tải thẳng file về máy; trên điện thoại mở bảng
-            Chia sẻ.
+            tuần, cho cả quán hoặc một người). Bấm <b>Xuất PDF</b> để tải file về máy (trên điện
+            thoại mở bảng Chia sẻ) — <b>muốn in thì mở file PDF đó rồi in</b>, tờ in ra sạch, đủ mọi
+            trang, có kẻ bảng. <b>Xuất PDF lịch một tuần sẽ khóa lịch tháng</b> để bản treo luôn
+            khớp với hệ thống.
           </p>
 
           {isLocked && (
