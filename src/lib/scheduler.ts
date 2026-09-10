@@ -2296,8 +2296,11 @@ function planNightWork(state: SchedulerState, employees: Employee[], rng: () => 
     // Plan klar abgelehnt – NIE ein 15-h-Nachtdienst.
     if (slots.length < needed) {
       throw new Error(
-        `Không đủ ngày để xếp ${hours}h làm sau 20h cho ${emp.name} ` +
-          `(mỗi ca tối đa ${NIGHT_MAX_HOURS}h). Giảm giờ đêm hoặc để người này làm ít ngày ban ngày hơn.`,
+        `Không đủ buổi tối để xếp ${hours}h làm sau 20h cho ${emp.name}: ` +
+          `cần ít nhất ${needed} buổi (mỗi ca tối đa ${NIGHT_MAX_HOURS}h, tan trước 1h sáng), ` +
+          `nhưng chỉ có ${slots.length} (ca đóng cửa ${closers.length} + ngày trống ${freeDays.length}). ` +
+          `Cho ${emp.name} làm thêm ngày (mở rộng „Ngày làm trong tuần", tăng „Số ngày làm mỗi tuần"), ` +
+          `giảm giờ định mức ban ngày, hoặc giảm giờ đêm.`,
       );
     }
     const chunks = evenChunks(hours, slots.length);
