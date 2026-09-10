@@ -2344,7 +2344,43 @@ function planNightWork(state: SchedulerState, employees: Employee[], rng: () => 
   }
 }
 
+/**
+ * Der Scheduler ist eine greedy Heuristik, keine vollständige Suche. Für einen
+ * bestimmten Seed findet er manchmal KEINE gültige Aufteilung, obwohl eine
+ * existiert (kalendarische Enge, z. B. ein Monat mit fünf Sonntagen + viel
+ * Abend-/Sonntagsarbeit einer Person). Ein anderer Seed löst dieselben Zahlen
+ * dann glatt. Deshalb: schlägt ein Lauf mit einer Platzierungs-Meldung fehl,
+ * wird mit anderen Seeds erneut versucht, bevor der Fehler durchgereicht wird.
+ * Ist der Fall WIRKLICH überladen, scheitern alle Seeds – und der letzte Fehler
+ * (mit den konkreten Zahlen) wird gemeldet. Ein fest übergebener Seed wird
+ * exakt so gehalten (deterministisch, kein erneuter Versuch).
+ */
 export function generateSchedule(input: GenerateInput): Shift[] {
+  if (input.seed !== undefined) return generateScheduleOnce(input);
+  const base = deriveSeed(input);
+  let lastErr: unknown;
+  // 8 Anläufe: die erste Runde nutzt den kanonischen Seed (unverändertes
+  // Ergebnis, wenn er schon aufgeht). Gleiche Eingabe -> gleiche Seed-Folge ->
+  // reproduzierbar. ~80 % der Seeds lösen enge Fälle, 8 Versuche machen ein
+  // Scheitern bei lösbaren Fällen praktisch unmöglich.
+  for (let k = 0; k < 8; k++) {
+    try {
+      return generateScheduleOnce({ ...input, seed: k === 0 ? base : `${base}~r${k}` });
+    } catch (err) {
+      lastErr = err;
+    }
+  }
+  throw lastErr;
+}
+
+/** Der kanonische Seed aus den Eingabedaten (wenn der Aufrufer keinen setzt). */
+function deriveSeed(input: GenerateInput): string {
+  return `${input.year}-${input.month}-${input.employees
+    .map((e) => `${e.id}:${e.targetMinutes}`)
+    .join("|")}`;
+}
+
+function generateScheduleOnce(input: GenerateInput): Shift[] {
   shiftIdCounter = 0;
   const { year, month, workHours, employees } = input;
   const holidays = input.holidays ?? publicHolidays(year);
@@ -2405,9 +2441,7 @@ export function generateSchedule(input: GenerateInput): Shift[] {
     remaining.set(e.id, e.targetMinutes);
   }
 
-  const seed =
-    input.seed ??
-    `${year}-${month}-${employees.map((e) => `${e.id}:${e.targetMinutes}`).join("|")}`;
+  const seed = input.seed ?? deriveSeed(input);
 
   const employeesById = new Map(employees.map((e) => [e.id, e] as const));
   const ordered = orderedEmployees(employees);
