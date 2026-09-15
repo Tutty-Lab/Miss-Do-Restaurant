@@ -84,16 +84,29 @@ export async function elementsToPdf(elements: HTMLElement[], filename: string): 
 }
 
 /**
+ * Berührungsgerät (Handy/Tablet)? Nur DORT ist das System-Teilen-Menü der
+ * richtige Weg. Am Rechner unterstützen Safari/Chrome navigator.share für
+ * Dateien inzwischen ebenfalls – dann öffnete sich beim „Xuất PDF" das
+ * Teilen-Menü (AirDrop, Nachrichten, Notizen …) STATT die Datei einfach
+ * herunterzuladen. Deshalb wird geteilt nur bei grobem Zeiger (Touch), sonst
+ * klassisch heruntergeladen.
+ */
+function isTouchDevice(): boolean {
+  if (typeof window === "undefined" || !window.matchMedia) return false;
+  return window.matchMedia("(pointer: coarse)").matches;
+}
+
+/**
  * PDF ausliefern. Auf dem Handy NICHT einfach herunterladen:
  * iOS Safari ignoriert das download-Attribut und zeigt die PDF stattdessen
- * nur an, statt sie zu speichern. Deshalb zuerst das System-Teilen-Menü
- * anbieten („In Dateien sichern", per Zalo/Mail verschicken …) und nur am
- * Rechner den klassischen Download nehmen.
+ * nur an, statt sie zu speichern. Deshalb dort zuerst das System-Teilen-Menü
+ * anbieten („In Dateien sichern", per Zalo/Mail verschicken …). Am Rechner
+ * (feiner Zeiger/Maus) IMMER der klassische Download in den Dateien-Ordner.
  */
 async function deliver(blob: Blob, filename: string): Promise<void> {
   const file = new File([blob], filename, { type: "application/pdf" });
 
-  if (typeof navigator !== "undefined" && navigator.canShare?.({ files: [file] })) {
+  if (isTouchDevice() && navigator.canShare?.({ files: [file] })) {
     try {
       await navigator.share({ files: [file], title: filename });
       return;
