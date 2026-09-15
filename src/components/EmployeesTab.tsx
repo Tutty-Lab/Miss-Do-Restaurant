@@ -124,12 +124,12 @@ export function EmployeesTab({ store }: { store: UseScheduleReturn }) {
           Chưa có nhân viên. Bấm <b>+ Thêm</b> để tạo.
         </div>
       ) : (
-        <ul className="space-y-2">
+        <ul className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-2">
           {schedule.employees.map((emp) => (
             <li key={emp.id}>
               <button
                 onClick={() => setOffen(emp.id)}
-                className="w-full text-left rounded-lg border border-slate-200 p-3 flex items-center gap-3 hover:bg-slate-50 active:bg-slate-100 transition-colors"
+                className="h-full w-full text-left rounded-lg border border-slate-200 p-3 flex items-center gap-3 hover:bg-slate-50 active:bg-slate-100 transition-colors"
               >
                 <EmployeeSummaryRow emp={emp} />
                 <span className="text-slate-300 text-lg leading-none">›</span>

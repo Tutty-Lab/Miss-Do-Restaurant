@@ -43,7 +43,7 @@ export function Dashboard({ store }: { store: UseScheduleReturn }) {
 
   return (
     <div>
-      <div className="grid grid-cols-2 md:grid-cols-6 gap-2">
+      <div className="grid grid-cols-2 sm:grid-cols-4 xl:grid-cols-7 gap-2">
         <Stat label="Số nhân viên" value={String(schedule.employees.length)} />
         <Stat label="Toàn thời gian" value={String(vz)} />
         <Stat label="Bán thời gian" value={String(tz)} />
