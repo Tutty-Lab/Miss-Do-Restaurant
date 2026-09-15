@@ -27,7 +27,7 @@ import {
 } from "./demand";
 import { getShiftTemplate, type TemplateType } from "./shifts";
 import { consecutiveRunLengthWith, seededRandom } from "./consecutive";
-import { MAX_PAID_MINUTES } from "./validation";
+import { MAX_PAID_MINUTES, MAX_DAILY_PAID_MINUTES } from "./validation";
 import { mayWorkOn } from "./availability";
 import { weekStartOf } from "./weeks";
 import { calculatePause, presenceFromPaid } from "./time";
@@ -2227,8 +2227,15 @@ function addSundayShifts(state: SchedulerState, plan: SundayAssignment[]): void 
   }
 }
 
-/** Ein Tag für die Abendreinigung: entweder Schließer verlängern oder neuer Block. */
-type NightSlot = { extend: Shift } | { date: string };
+/**
+ * Ein Tag für die Abendreinigung: entweder einen Schließer verlängern oder ein
+ * neuer Block auf einem freien Werktag. `cap` = wie viele STUNDEN Abendreinigung
+ * dieser Abend höchstens aufnehmen darf (Schließer: bis zur 10-h-Tagesgrenze;
+ * freier Tag: NIGHT_MAX_HOURS).
+ */
+type NightSlot =
+  | { extend: Shift; date: string; cap: number }
+  | { date: string; cap: number };
 
 /**
  * Abendarbeit nach 20:00 je Person: streut nightMinutes auf einige Tage.
@@ -2255,57 +2262,89 @@ function planNightWork(state: SchedulerState, employees: Employee[], rng: () => 
     const hours = total / 60;
     const worked = state.worked.get(emp.id)!;
 
-    // Schließer-Dienste (Ende genau 20:00, nicht Sonntag): verlängerbar ohne neuen Tag.
-    const closers = state.shifts.filter(
-      (s) => s.employeeId === emp.id && s.endMinutes === NIGHT_START && s.category !== "SUNDAY",
-    );
-    const freeDays = state.dates.filter(
-      (d) =>
-        !state.dayOf(d).closed &&
-        weekdayKeyOf(parseIsoDate(d)) !== "sunday" &&
-        mayWorkOn(emp, d) &&
-        !worked.has(d),
-    );
+    // Schließer-Dienste (Ende genau 20:00, nicht Sonntag): verlängerbar ohne neuen
+    // Tag. Wie viel Abendreinigung ein Schließer noch AUFNEHMEN darf, begrenzt die
+    // gesetzliche Tagesgrenze (MAX_DAILY_PAID_MINUTES = 10 h bezahlt): ein
+    // 9-h-Schließer verträgt nur noch 1 h, ein 6-h-Schließer die vollen 5 h. Ohne
+    // diesen Deckel wuchs ein langer Schließer durch die Reinigung auf 11–12 h.
+    const closerRoom = (s: Shift): number =>
+      Math.max(0, Math.min(NIGHT_MAX_HOURS, (MAX_DAILY_PAID_MINUTES - s.paidMinutes) / 60));
 
-    // Anzahl Abende: mind. so viele, dass kein Dienst über NIGHT_MAX_HOURS geht,
-    // Zielschnitt ~NIGHT_AVG_HOURS (3–4 h je Abend). Schließer zuerst (kein neuer
-    // Tag), dann freie Werktage. GLEICHMÄSSIG verteilt (evenChunks), nicht zufällig.
-    const needed = Math.ceil(hours / NIGHT_MAX_HOURS);
-    const wantDays = Math.min(
-      closers.length + freeDays.length,
-      Math.max(needed, Math.round(hours / NIGHT_AVG_HOURS)),
-    );
-    // Schließer bevorzugt an Tagen ohne Abendreinigung wählen (breit streuen).
-    const useClosers = preferFree(closers, (s) => s.date).slice(0, Math.min(wantDays, closers.length));
-    // Freie Werktage ebenso bevorzugt-frei, aber 6-Tage-Regel wahren.
-    const extraNeeded = wantDays - useClosers.length;
-    const extraDays: string[] = [];
-    if (extraNeeded > 0) {
-      for (const d of preferFree(freeDays, (d) => d)) {
-        if (extraDays.length >= extraNeeded) break;
-        if (consecutiveRunLengthWith(worked, d) > 6) continue;
-        extraDays.push(d);
-        worked.add(d);
-      }
+    const closerSlots: NightSlot[] = preferFree(
+      state.shifts.filter(
+        (s) => s.employeeId === emp.id && s.endMinutes === NIGHT_START && s.category !== "SUNDAY",
+      ),
+      (s) => s.date,
+    )
+      .map((s) => ({ extend: s, date: s.date, cap: closerRoom(s) }) as NightSlot)
+      .filter((slot) => slot.cap > 0);
+
+    // Freie Werktage: neuer Reinigungsblock ab 20:00 (voller NIGHT_MAX-Spielraum),
+    // 6-Tage-Regel wahren. Ein Tag wird erst dann „worked", wenn ihm unten auch
+    // Stunden zugeteilt werden – hier nur probeweise für die Ketten-Prüfung.
+    const trial = new Set(worked);
+    const freeSlots: NightSlot[] = [];
+    for (const d of preferFree(
+      state.dates.filter(
+        (d) =>
+          !state.dayOf(d).closed &&
+          weekdayKeyOf(parseIsoDate(d)) !== "sunday" &&
+          mayWorkOn(emp, d) &&
+          !worked.has(d),
+      ),
+      (d) => d,
+    )) {
+      if (consecutiveRunLengthWith(trial, d) > 6) continue;
+      trial.add(d);
+      freeSlots.push({ date: d, cap: NIGHT_MAX_HOURS });
     }
-    const slots: NightSlot[] = [
-      ...useClosers.map((s) => ({ extend: s }) as NightSlot),
-      ...extraDays.map((d) => ({ date: d }) as NightSlot),
-    ];
-    // Passt die Summe nicht auf genug Abende (jeder <= NIGHT_MAX_HOURS), wird der
-    // Plan klar abgelehnt – NIE ein 15-h-Nachtdienst.
-    if (slots.length < needed) {
+
+    // Schließer zuerst (kein neuer Tag), dann freie Werktage. So viele Abende
+    // wählen, bis die Kapazität reicht UND der Zielschnitt (~NIGHT_AVG je Abend,
+    // mind. ceil(hours/NIGHT_MAX)) erfüllt ist.
+    const ordered: NightSlot[] = [...closerSlots, ...freeSlots];
+    const needed = Math.ceil(hours / NIGHT_MAX_HOURS);
+    const desiredCount = Math.max(needed, Math.round(hours / NIGHT_AVG_HOURS));
+    const picked: NightSlot[] = [];
+    let capSum = 0;
+    for (const slot of ordered) {
+      if (capSum >= hours && picked.length >= desiredCount) break;
+      picked.push(slot);
+      capSum += slot.cap;
+    }
+    // Reicht die Kapazität ALLER Abende zusammen nicht (jeder <= NIGHT_MAX_HOURS
+    // und Tagessumme <= 10 h), wird der Plan klar abgelehnt – NIE ein Dienst über
+    // der Tagesgrenze und NIE ein 15-h-Nachtdienst.
+    if (capSum < hours) {
+      const evenings = closerSlots.length + freeSlots.length;
       throw new Error(
         `Không đủ buổi tối để xếp ${hours}h làm sau 20h cho ${emp.name}: ` +
-          `cần ít nhất ${needed} buổi (mỗi ca tối đa ${NIGHT_MAX_HOURS}h, tan trước 1h sáng), ` +
-          `nhưng chỉ có ${slots.length} (ca đóng cửa ${closers.length} + ngày trống ${freeDays.length}). ` +
+          `mỗi ca tối đa ${NIGHT_MAX_HOURS}h và tổng giờ công cả ngày không quá 10h, ` +
+          `nên chỉ chứa được ${capSum}h trên ${evenings} buổi ` +
+          `(ca đóng cửa ${closerSlots.length} + ngày trống ${freeSlots.length}). ` +
           `Cho ${emp.name} làm thêm ngày (mở rộng „Ngày làm trong tuần", tăng „Số ngày làm mỗi tuần"), ` +
           `giảm giờ định mức ban ngày, hoặc giảm giờ đêm.`,
       );
     }
-    const chunks = evenChunks(hours, slots.length);
-    slots.forEach((slot, i) => {
-      const paid = chunks[i];
+
+    // Stunden möglichst GLEICHMÄSSIG auf die gewählten Abende verteilen, nie über
+    // die Kapazität eines Abends (water-filling: je 1 h auf den derzeit am
+    // wenigsten belasteten Abend mit Restplatz).
+    const load = picked.map(() => 0);
+    let left = hours;
+    while (left > 0) {
+      let best = -1;
+      for (let i = 0; i < picked.length; i++) {
+        if (load[i] < picked[i].cap && (best < 0 || load[i] < load[best])) best = i;
+      }
+      if (best < 0) break; // nach der Kapazitätsprüfung nicht erreichbar
+      load[best] += 1;
+      left -= 1;
+    }
+
+    picked.forEach((slot, i) => {
+      const paid = load[i] * 60;
+      if (paid <= 0) return; // Abend blieb leer – nicht anfassen
       if ("extend" in slot) {
         // Abendreinigung nach 20:00 an den Schließer hängen (= Nachtzuschlag).
         const s = slot.extend;
@@ -2337,7 +2376,7 @@ function planNightWork(state: SchedulerState, employees: Employee[], rng: () => 
           shiftType: "CUSTOM",
           generated: true,
         });
-        // worked wurde oben beim Auswählen des freien Tages gesetzt.
+        worked.add(slot.date);
         nightDates.add(slot.date);
       }
     });

@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { chooseShiftHours, maxShiftHoursForWindow } from "../scheduler";
+import { chooseShiftHours, generateSchedule, maxShiftHoursForWindow } from "../scheduler";
+import { DEFAULT_WORK_HOURS } from "../workHours";
+import { makeEmployee } from "../sampleData";
+import { MAX_DAILY_PAID_MINUTES, MAX_PAID_MINUTES } from "../validation";
 
 describe("maxShiftHoursForWindow", () => {
   it("rechnet mit Anwesenheit inkl. Pause, nicht mit bezahlter Zeit", () => {
@@ -57,5 +60,39 @@ describe("chooseShiftHours – Teilzeit und Minijob", () => {
   it("gibt 0 zurück, wenn keine gültige Länge möglich ist", () => {
     expect(chooseShiftHours(160 * 60, 2, "VOLLZEIT")).toBe(0); // Fenster < 3 h
     expect(chooseShiftHours(2 * 60, 8, "TEILZEIT")).toBe(0); // Rest zu klein (< 3 h)
+  });
+});
+
+describe("Abendreinigung sprengt nie die 10-h-Tagesgrenze", () => {
+  // Regression: Früher hängte planNightWork die Abendstunden ungedeckelt an einen
+  // Schließer. Ein 9-h-Schließer + 3 h Reinigung ergab 12 h bezahlte Zeit – über
+  // der gesetzlichen Tageshöchstzeit. Jetzt begrenzt die Kapazität je Abend die
+  // Summe auf höchstens 10 h bezahlt (Ladenteil weiterhin ≤ 9 h).
+  it("hält bei viel Soll + viel Abendarbeit jede Schicht ≤ 10 h bezahlt", () => {
+    const employees = [
+      makeEmployee("v1", "Voll A", "VOLLZEIT", 200, { nightHours: 20 }),
+      makeEmployee("v2", "Voll B", "VOLLZEIT", 200, { nightHours: 20 }),
+      makeEmployee("t1", "Teil C", "TEILZEIT", 90, { nightHours: 8 }),
+      makeEmployee("t2", "Teil D", "TEILZEIT", 90),
+      makeEmployee("m1", "Mini E", "MINIJOB", 40),
+    ];
+    // Mehrere Monate prüfen (verschiedene Kalenderlagen / Seeds).
+    for (const month of [1, 3, 9, 12]) {
+      const shifts = generateSchedule({
+        year: 2026,
+        month,
+        workHours: DEFAULT_WORK_HOURS,
+        employees: employees.map((e) => ({ ...e })),
+      });
+      for (const s of shifts) {
+        const floorPaid = s.paidMinutes - (s.nightMinutes ?? 0);
+        expect(s.paidMinutes, `Monat ${month}, ${s.date}: bezahlte Zeit > 10 h`).toBeLessThanOrEqual(
+          MAX_DAILY_PAID_MINUTES,
+        );
+        expect(floorPaid, `Monat ${month}, ${s.date}: Ladenteil > 9 h`).toBeLessThanOrEqual(
+          MAX_PAID_MINUTES,
+        );
+      }
+    }
   });
 });

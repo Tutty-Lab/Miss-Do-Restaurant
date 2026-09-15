@@ -35,8 +35,20 @@ export type ValidationResult = {
   summaries: EmployeeSummary[];
 };
 
-/** Gesetzliche Höchstarbeitszeit je Tag (§ 3 ArbZG), bezahlt, ohne Pause. */
+/**
+ * Höchstlänge des LADEN-Dienstes je Tag (bezahlt, ohne Pause). Betriebsvorgabe
+ * 9 h – strenger als das Gesetz, damit der Floor-Dienst nicht ans Limit geht.
+ */
 export const MAX_PAID_MINUTES = 9 * 60;
+/**
+ * Gesetzliche Tageshöchstarbeitszeit (§ 3 ArbZG), bezahlt, ohne Pause: 10 h.
+ * Diese Grenze gilt für die GESAMTE bezahlte Zeit eines Tages – Ladendienst
+ * PLUS Abendreinigung (nightMinutes). Der Ladenteil darf 9 h nicht übersteigen
+ * (MAX_PAID_MINUTES), die Summe inkl. Reinigung nie 10 h. Ohne diese zweite
+ * Grenze konnte ein 9-h-Schließer durch angehängte Abendreinigung auf 11–12 h
+ * bezahlte Zeit wachsen – gesetzeswidrig.
+ */
+export const MAX_DAILY_PAID_MINUTES = 10 * 60;
 const MAX_CONSECUTIVE_DAYS = 6;
 
 export function validateSchedule(
@@ -85,6 +97,16 @@ export function validateSchedule(
         employeeId: shift.employeeId,
         date: shift.date,
         message: `Quá 9 giờ công ngày ${shift.date}.`,
+      });
+    }
+    // Gesetzliche Tagesgrenze: die GESAMTE bezahlte Zeit (Laden + Abendreinigung)
+    // darf nie über 10 h. Greift auch dann, wenn der Ladenteil ≤ 9 h bleibt und
+    // erst die angehängte Reinigung die Summe über 10 h treibt.
+    if (shift.paidMinutes > MAX_DAILY_PAID_MINUTES) {
+      errors.push({
+        employeeId: shift.employeeId,
+        date: shift.date,
+        message: `Quá 10 giờ công ngày ${shift.date} (tối đa 10h theo luật).`,
       });
     }
     if (shift.paidMinutes !== expectedPaid) {
