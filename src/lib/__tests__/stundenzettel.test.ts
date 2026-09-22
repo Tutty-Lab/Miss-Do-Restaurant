@@ -79,6 +79,34 @@ describe("buildTimesheet", () => {
     expect(sheet.sundayHoursText).toBe("0,00");
   });
 
+  it("zählt Zuschlags-Termine je Person (Abende / Sonntage)", () => {
+    const sheet = buildTimesheet(janSchedule(), employee);
+    expect(sheet.nightSessions).toBe(1); // nur der 05.01. hat Arbeit nach 20 Uhr
+    expect(sheet.sundaySessions).toBe(0); // kein Sonntagsdienst
+
+    // Mit einem Sonntagsdienst: ein gearbeiteter Sonntag, weiterhin 1 Abend.
+    const withSunday = {
+      ...janSchedule(),
+      shifts: [
+        ...janSchedule().shifts,
+        {
+          id: "so",
+          employeeId: "e1",
+          date: "2026-01-04", // Sonntag
+          startMinutes: 540,
+          endMinutes: 780,
+          pauseMinutes: 0,
+          paidMinutes: 240,
+          generated: false,
+          shiftType: "CUSTOM" as const,
+        },
+      ],
+    };
+    const s2 = buildTimesheet(withSunday, employee);
+    expect(s2.sundaySessions).toBe(1);
+    expect(s2.nightSessions).toBe(1);
+  });
+
   it("zählt Split-Zeilen für die Seitenanpassung mit", () => {
     const sheet = buildTimesheet(janSchedule(), employee);
     // 31 Tage, davon einer mit 2 Zeilen => 32.

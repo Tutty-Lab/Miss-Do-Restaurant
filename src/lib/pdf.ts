@@ -246,7 +246,7 @@ function drawFooter(doc: jsPDF, sheet: Timesheet, startY: number): void {
   doc.line(thirds[1], y, thirds[1] + 24, y); // Sollstunden: leer
   doc.line(thirds[2], y, thirds[2] + 24, y); // Differenz: leer
 
-  // Zuschläge (nur Stundensumme).
+  // Zuschläge: Stundensumme UND Anzahl der Termine (Abende / Sonntage).
   y += 8;
   doc.setDrawColor(GRID[0], GRID[1], GRID[2]);
   doc.setLineWidth(0.2);
@@ -254,12 +254,21 @@ function drawFooter(doc: jsPDF, sheet: Timesheet, startY: number): void {
   doc.setFont(FONT, "bold");
   doc.setFontSize(8.5);
   setColor(doc, INK);
-  doc.text("Zuschläge (nur Stundensumme)", MARGIN, y);
+  doc.text("Zuschläge (Stunden und Anzahl)", MARGIN, y);
   y += 5;
   doc.setFont(FONT, "normal");
   setColor(doc, MUTED);
-  doc.text(`Nachtzuschlag (Mo–Sa, ab 20:00): ${sheet.nightHoursText} h`, thirds[0], y);
-  doc.text(`Sonntagszuschlag (Sonntag): ${sheet.sundayHoursText} h`, thirds[1], y);
+  const halfX = [MARGIN, MARGIN + CONTENT_W / 2];
+  doc.text(
+    `Nachtzuschlag (Mo–Sa, ab 20:00): ${sheet.nightHoursText} h · ${sheet.nightSessions} Abende`,
+    halfX[0],
+    y,
+  );
+  doc.text(
+    `Sonntagszuschlag (Sonntag): ${sheet.sundayHoursText} h · ${sheet.sundaySessions} Sonntage`,
+    halfX[1],
+    y,
+  );
 
   // Unterschriften.
   y += 16;

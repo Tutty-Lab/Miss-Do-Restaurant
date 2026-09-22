@@ -1,8 +1,8 @@
 // ============================================================================
-// Datenmodell für den Stundenzettel – EINE Quelle für Bildschirm-Vorschau
-// (StundenzettelPage) UND Vektor-PDF (pdf.ts). Dieselbe Zeilen-/Summen-Logik an
-// beiden Stellen: was man auf dem Schirm sieht, steht Zeichen für Zeichen so in
-// der PDF (Checklist: „Gesamtstunden = Summe der Stundenspalte = stimmt überein").
+// Datenmodell für den Stundenzettel, das die Vektor-PDF (pdf.ts) zeichnet. Die
+// Bildschirm-Vorschau bettet dieselbe PDF ein – Vorschau und Ausdruck sind damit
+// Zeichen für Zeichen identisch (Checklist: „Gesamtstunden = Summe der
+// Stundenspalte = stimmt überein").
 // ============================================================================
 
 import type { Employee, Schedule, Shift } from "../types";
@@ -16,7 +16,7 @@ import { minutesToDecimalHours, minutesToTime } from "./time";
 import { MONTH_NAMES_DE } from "./dateFormat";
 import { publicHolidayNames } from "./holidays";
 import { format } from "date-fns";
-import { zuschlagTotals, timesheetParts } from "./zuschlaege";
+import { zuschlagTotals, timesheetParts, shiftMinutesAfter20 } from "./zuschlaege";
 import { employmentLabelDe } from "./employment";
 
 /** Eine gedruckte Zeile innerhalb eines Arbeitstags (bei Split-Schicht mehrere). */
@@ -55,6 +55,10 @@ export type Timesheet = {
   totalText: string; // "128,50"
   nightHoursText: string; // Nachtzuschlag-Stunden
   sundayHoursText: string; // Sonntagszuschlag-Stunden
+  /** Anzahl Abende mit Nachtzuschlag (Tage mit Arbeit nach 20:00, Mo–Sa). */
+  nightSessions: number;
+  /** Anzahl gearbeiteter Sonntage. */
+  sundaySessions: number;
   /** Summe aller gedruckten Zeilen (Tage + zusätzliche Split-Zeilen) – für die
    * PDF-Schriftgröße, damit jede Person auf genau eine A4-Seite passt. */
   lineCount: number;
@@ -85,6 +89,12 @@ export function buildTimesheet(
   const shownShifts = days.flatMap((d) => byDate.get(d) ?? []);
   const totalMinutes = shownShifts.reduce((sum, s) => sum + s.paidMinutes, 0);
   const surcharges = zuschlagTotals(shownShifts);
+  // Anzahl der Zuschlags-Termine je Person (Betrieb rechnet Zuschläge mit):
+  // Abende mit Arbeit nach 20:00 (Mo–Sa) und gearbeitete Sonntage.
+  const nightSessions = shownShifts.filter((s) => shiftMinutesAfter20(s) > 0).length;
+  const sundaySessions = shownShifts.filter(
+    (s) => weekdayKeyOf(parseIsoDate(s.date)) === "sunday",
+  ).length;
   const holidayNames = publicHolidayNames(schedule.year);
   const closedByDate = new Map(
     schedule.dateOverrides.filter((o) => o.closed).map((o) => [o.date, o] as const),
@@ -151,6 +161,8 @@ export function buildTimesheet(
     totalText: minutesToDecimalHours(totalMinutes),
     nightHoursText: minutesToDecimalHours(surcharges.after20Minutes),
     sundayHoursText: minutesToDecimalHours(surcharges.sundayMinutes),
+    nightSessions,
+    sundaySessions,
     lineCount,
   };
 }

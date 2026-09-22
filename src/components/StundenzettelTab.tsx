@@ -1,7 +1,6 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type { UseScheduleReturn } from "../hooks/useSchedule";
-import { StundenzettelPage } from "./StundenzettelPage";
-import { stundenzettelToPdf, safeFileName } from "../lib/pdf";
+import { stundenzettelToPdf, buildStundenzettelDoc, safeFileName } from "../lib/pdf";
 import { weeksOfMonth } from "../lib/weeks";
 
 export function StundenzettelTab({ store }: { store: UseScheduleReturn }) {
@@ -44,6 +43,31 @@ export function StundenzettelTab({ store }: { store: UseScheduleReturn }) {
     if (!w) return null;
     return { dates: w.dates, label: `Woche ${w.label}${schedule.year}` };
   }
+
+  // Vorschau = die ECHTE PDF (als Blob im iframe), damit Bildschirm und Ausdruck
+  // Zeichen für Zeichen identisch sind. Baut für die gewählte Person + Zeitraum neu.
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  useEffect(() => {
+    if (!previewEmployee || schedule.shifts.length === 0) {
+      setPreviewUrl(null);
+      return;
+    }
+    let dates: string[] | undefined;
+    let periodLabel: string | undefined;
+    if (what.startsWith("sz-")) {
+      const sz = szWeekFor(what.slice(3));
+      dates = sz?.dates;
+      periodLabel = sz?.label;
+    }
+    const blob = buildStundenzettelDoc(schedule, [previewEmployee], { dates, periodLabel }).output(
+      "blob",
+    );
+    const url = URL.createObjectURL(blob);
+    setPreviewUrl(url);
+    return () => URL.revokeObjectURL(url);
+    // previewEmployee ist je Render neu; nur seine id ist stabil.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [schedule, previewEmployee?.id, what]);
 
   async function onPdf() {
     if (pdfBusy || chosenEmployees.length === 0) return;
@@ -227,16 +251,24 @@ export function StundenzettelTab({ store }: { store: UseScheduleReturn }) {
         )}
       </div>
 
-      {/* Xem trước trên màn hình cho nhân viên đã chọn */}
+      {/* Xem trước = ĐÚNG file PDF sẽ in ra (nhúng thẳng), cho nhân viên đã chọn */}
       {previewEmployee && (
         <>
           <div className="mb-1 text-xs text-slate-500">
-            Xem trước bảng chấm công: <b>{previewEmployee.name}</b>
+            Xem trước (đúng như bản in PDF): <b>{previewEmployee.name}</b>
             {who === "all" && " (chọn một người ở ô „Cho ai“ để xem người khác)"}
           </div>
-          <div className="rounded-lg border border-slate-300 shadow-sm bg-white overflow-x-auto">
-            <StundenzettelPage schedule={schedule} employee={previewEmployee} />
-          </div>
+          {previewUrl ? (
+            <iframe
+              title={`Stundenzettel ${previewEmployee.name}`}
+              src={previewUrl}
+              className="w-full aspect-[210/297] rounded-lg border border-slate-300 shadow-sm bg-white"
+            />
+          ) : (
+            <div className="rounded-lg border border-slate-300 bg-white p-6 text-center text-sm text-slate-400">
+              {hasSchedule ? "Đang tạo bản xem trước…" : "Chưa có lịch để xem trước."}
+            </div>
+          )}
         </>
       )}
     </div>
