@@ -10,6 +10,13 @@ export default defineConfig({
   // Achtung: NEXT_PUBLIC_*/VITE_* landen im öffentlichen Bundle. Niemals
   // Service-Role-Key oder Postgres-Passwort so benennen.
   envPrefix: ["VITE_", "NEXT_PUBLIC_"],
+  server: {
+    // Den von der Vorschau-Umgebung zugewiesenen Port (PORT) übernehmen, damit
+    // parallel laufende Projekte (z. B. auf 5173) nicht kollidieren; sonst
+    // Vite-Standard. strictPort:false lässt Vite bei Belegung hochzählen.
+    port: Number(process.env.PORT) || 5173,
+    strictPort: false,
+  },
   plugins: [
     react(),
     VitePWA({
