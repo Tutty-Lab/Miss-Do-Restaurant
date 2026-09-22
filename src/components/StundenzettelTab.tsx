@@ -1,23 +1,8 @@
-import { useMemo, useRef, useState } from "react";
-import { flushSync } from "react-dom";
+import { useMemo, useState } from "react";
 import type { UseScheduleReturn } from "../hooks/useSchedule";
-import type { Employee } from "../types";
 import { StundenzettelPage } from "./StundenzettelPage";
-import { SchedulePrintPage, type SchedulePrintLayout } from "./SchedulePrintPage";
-import { elementsToPdf, safeFileName } from "../lib/pdf";
+import { stundenzettelToPdf, safeFileName } from "../lib/pdf";
 import { weeksOfMonth } from "../lib/weeks";
-import { datesOfMonth } from "../lib/demand";
-import { monthLabel } from "../lib/shiftOps";
-
-/** Dienstplan-Ausdruck (Monat oder eine Woche), evtl. auf eine Person gefiltert. */
-type ScheduleRange = {
-  dates: string[];
-  title: string;
-  layout: SchedulePrintLayout;
-  employeeIds?: string[];
-  /** Gesetzt bei einer Woche: nach dem Ausgeben wird der Monat gesperrt. */
-  weekStart?: string;
-};
 
 export function StundenzettelTab({ store }: { store: UseScheduleReturn }) {
   const { schedule, isLocked, markWeekPrinted, unlockMonth } = store;
@@ -25,8 +10,7 @@ export function StundenzettelTab({ store }: { store: UseScheduleReturn }) {
   // ── Auswahl: WER (eine Person oder der ganze Laden) und WAS ─────────────
   // who: "all" = ganzer Laden, sonst eine employeeId.
   const [who, setWho] = useState<string>("all");
-  // what: "stundenzettel" (Monats-Stundenzettel) | "month" (Dienstplan Monat)
-  //       | ein weekStart (Dienstplan dieser Woche).
+  // what: "stundenzettel" (Monats-Stundenzettel) | "sz-<weekStart>" (Woche).
   const [what, setWhat] = useState<string>("stundenzettel");
 
   const weeks = useMemo(
@@ -34,20 +18,10 @@ export function StundenzettelTab({ store }: { store: UseScheduleReturn }) {
     [schedule.year, schedule.month],
   );
 
-  // Drucken UND Speichern bauen aus DERSELBEN Offscreen-Bühne (pdfStage) eine
-  // PDF. Speichern liefert die Datei aus; Drucken öffnet sie in einem neuen Tab
-  // und lässt sie drucken. Beide drucken PDF-Inhalt -> KEINE Browser-Kopf-/
-  // Fußzeile (URL, Datum, Seitenzahl), die window.print() auf dem HTML anhängt
-  // und die CSS auf Handy-Browsern nicht wegbekommt. Alle Blätter kommen mit.
-  const [pdfList, setPdfList] = useState<Employee[] | null>(null);
-  const [pdfSchedule, setPdfSchedule] = useState<ScheduleRange | null>(null);
+  // Vektor-PDF: kein Offscreen-Rendern mehr nötig – direkt aus den Daten
+  // gezeichnet. Fortschritt X/N für „cả quán" (viele Seiten).
   const [pdfBusy, setPdfBusy] = useState(false);
-  const pdfStage = useRef<HTMLDivElement>(null);
-
-  // Zeitraum für den Stundenzettel-Ausdruck: gesetzt => Wochen-Zettel (nur diese
-  // Tage), leer => ganzer Monat.
-  const [szDates, setSzDates] = useState<string[] | undefined>(undefined);
-  const [szLabel, setSzLabel] = useState<string | undefined>(undefined);
+  const [pdfProgress, setPdfProgress] = useState<{ done: number; total: number } | null>(null);
 
   /** Zweiter Klick für das Entsperren – ohne native Dialoge, siehe unten. */
   const [confirmUnlock, setConfirmUnlock] = useState(false);
@@ -62,83 +36,7 @@ export function StundenzettelTab({ store }: { store: UseScheduleReturn }) {
   // Für die Vorschau und die Dateinamen: eine konkrete Person.
   const previewEmployee =
     who === "all" ? schedule.employees[0] ?? null : chosenEmployees[0] ?? null;
-  const employeeIds = who === "all" ? undefined : [who];
   const whoTag = who === "all" ? "tat_ca" : safeFileName(previewEmployee?.name ?? who);
-
-  /**
-   * PDF: các trang phải được render thật (không display:none) thì html2canvas
-   * mới chụp được – vì vậy dùng "sân khấu" nằm ngoài màn hình.
-   */
-  async function doPdf(
-    list: Employee[],
-    filename: string,
-    sz?: { dates?: string[]; label?: string },
-  ) {
-    if (list.length === 0 || pdfBusy) return;
-    setPdfBusy(true);
-    flushSync(() => {
-      setPdfSchedule(null);
-      setSzDates(sz?.dates);
-      setSzLabel(sz?.label);
-      setPdfList(list);
-    });
-    try {
-      const pages = Array.from(
-        pdfStage.current?.querySelectorAll<HTMLElement>(".stundenzettel-page") ?? [],
-      );
-      await elementsToPdf(pages, filename);
-    } catch (err) {
-      alert(`Không tạo được PDF: ${err instanceof Error ? err.message : String(err)}`);
-    } finally {
-      setPdfList(null);
-      setPdfBusy(false);
-    }
-  }
-
-  /** PDF eines Dienstplans (Monat oder Woche). Eine Woche sperrt den Monat. */
-  async function doPdfSchedule(range: ScheduleRange, filename: string) {
-    if (range.dates.length === 0 || pdfBusy) return;
-    setPdfBusy(true);
-    flushSync(() => {
-      setPdfList(null);
-      setPdfSchedule(range);
-    });
-    try {
-      const pages = Array.from(
-        pdfStage.current?.querySelectorAll<HTMLElement>(".stundenzettel-page") ?? [],
-      );
-      await elementsToPdf(pages, filename);
-      if (range.weekStart) markWeekPrinted(range.weekStart);
-    } catch (err) {
-      alert(`Không tạo được PDF: ${err instanceof Error ? err.message : String(err)}`);
-    } finally {
-      setPdfSchedule(null);
-      setPdfBusy(false);
-    }
-  }
-
-  // Was genau ist gewählt? Baut den passenden Ausdruck-Auftrag.
-  function scheduleRangeFor(target: string): ScheduleRange | null {
-    if (target === "month") {
-      return {
-        dates: datesOfMonth(schedule.year, schedule.month),
-        title: monthLabel(schedule.year, schedule.month),
-        // 31 Tagesspalten passen nicht hochkant auf A4.
-        layout: "byDate",
-        employeeIds,
-      };
-    }
-    const w = weeks.find((x) => x.weekStart === target);
-    if (!w) return null;
-    return {
-      dates: w.dates,
-      title: `Woche ${w.label} · ${monthLabel(schedule.year, schedule.month)}`,
-      // Leute untereinander, Tage nebeneinander – bei 7 Spalten gut auf Papier.
-      layout: "byEmployee",
-      employeeIds,
-      weekStart: w.weekStart,
-    };
-  }
 
   // Wochen-Stundenzettel: nur die Tage dieser Woche, mit Wochentitel oben rechts.
   function szWeekFor(weekStart: string): { dates: string[]; label: string } | null {
@@ -147,23 +45,44 @@ export function StundenzettelTab({ store }: { store: UseScheduleReturn }) {
     return { dates: w.dates, label: `Woche ${w.label}${schedule.year}` };
   }
 
-  function onPdf() {
+  async function onPdf() {
+    if (pdfBusy || chosenEmployees.length === 0) return;
+
+    let filename: string;
+    let dates: string[] | undefined;
+    let periodLabel: string | undefined;
+    let weekStart: string | undefined;
+
     if (what === "stundenzettel") {
-      void doPdf(chosenEmployees, `Stundenzettel_${whoTag}_${monthTag}.pdf`);
-      return;
-    }
-    if (what.startsWith("sz-")) {
-      const weekStart = what.slice(3);
+      filename = `Stundenzettel_${whoTag}_${monthTag}.pdf`;
+    } else if (what.startsWith("sz-")) {
+      weekStart = what.slice(3);
       const sz = szWeekFor(weekStart);
-      if (sz) {
-        void doPdf(chosenEmployees, `Stundenzettel_${whoTag}_${monthTag}_tuan_${weekStart}.pdf`, sz);
-      }
+      if (!sz) return;
+      dates = sz.dates;
+      periodLabel = sz.label;
+      filename = `Stundenzettel_${whoTag}_${monthTag}_tuan_${weekStart}.pdf`;
+    } else {
       return;
     }
-    const range = scheduleRangeFor(what);
-    if (!range) return;
-    const suffix = what === "month" ? "thang" : `tuan_${what}`;
-    void doPdfSchedule(range, `Dienstplan_${whoTag}_${suffix}_${monthTag}.pdf`);
+
+    setPdfBusy(true);
+    setPdfProgress({ done: 0, total: chosenEmployees.length });
+    try {
+      await stundenzettelToPdf(schedule, chosenEmployees, filename, {
+        dates,
+        periodLabel,
+        onProgress: (done, total) => setPdfProgress({ done, total }),
+      });
+      // Wochen-Stundenzettel ausgegeben => Monat sperren (Wandaushang bleibt
+      // synchron). Wie früher beim Dienstplan, jetzt am Stundenzettel.
+      if (weekStart) markWeekPrinted(weekStart);
+    } catch (err) {
+      alert(`Không tạo được PDF: ${err instanceof Error ? err.message : String(err)}`);
+    } finally {
+      setPdfBusy(false);
+      setPdfProgress(null);
+    }
   }
 
   if (schedule.employees.length === 0) {
@@ -177,178 +96,149 @@ export function StundenzettelTab({ store }: { store: UseScheduleReturn }) {
   const hasSchedule = schedule.shifts.length > 0;
 
   return (
-    <>
-      {/* Điều khiển (không in) */}
-      <div className="no-print">
-        {/* ---- In & Xuất ---- */}
-        <div className="rounded-lg border border-slate-200 bg-white p-3 mb-4">
-          <div className="text-sm font-medium text-slate-700 mb-2">In &amp; Xuất file</div>
+    <div className="no-print">
+      {/* ---- Xuất PDF ---- */}
+      <div className="rounded-lg border border-slate-200 bg-white p-3 mb-4">
+        <div className="text-sm font-medium text-slate-700 mb-2">Xuất bảng chấm công (PDF)</div>
 
-          <div className="flex flex-wrap items-end gap-3">
-            {/* WER */}
-            <label className="flex flex-col gap-1">
-              <span className="text-xs text-slate-500">Cho ai</span>
-              <select
-                className="rounded border border-slate-300 px-2 py-2 text-sm min-w-[10rem]"
-                value={who}
-                onChange={(e) => setWho(e.target.value)}
-              >
-                <option value="all">Tất cả (cả quán)</option>
-                {schedule.employees.map((e) => (
-                  <option key={e.id} value={e.id}>
-                    {e.name}
-                  </option>
-                ))}
-              </select>
-            </label>
+        <div className="flex flex-wrap items-end gap-3">
+          {/* WER */}
+          <label className="flex flex-col gap-1">
+            <span className="text-xs text-slate-500">Cho ai</span>
+            <select
+              className="rounded border border-slate-300 px-2 py-2 text-sm min-w-[10rem]"
+              value={who}
+              onChange={(e) => setWho(e.target.value)}
+            >
+              <option value="all">Tất cả (cả quán)</option>
+              {schedule.employees.map((e) => (
+                <option key={e.id} value={e.id}>
+                  {e.name}
+                </option>
+              ))}
+            </select>
+          </label>
 
-            {/* WAS */}
-            <label className="flex flex-col gap-1">
-              <span className="text-xs text-slate-500">Nội dung</span>
-              <select
-                className="rounded border border-slate-300 px-2 py-2 text-sm min-w-[14rem]"
-                value={what}
-                onChange={(e) => setWhat(e.target.value)}
-              >
-                <option value="stundenzettel">Bảng chấm công (Stundenzettel) — cả tháng</option>
-                {weeks.map((w) => (
+          {/* WAS */}
+          <label className="flex flex-col gap-1">
+            <span className="text-xs text-slate-500">Kỳ</span>
+            <select
+              className="rounded border border-slate-300 px-2 py-2 text-sm min-w-[14rem]"
+              value={what}
+              onChange={(e) => setWhat(e.target.value)}
+            >
+              <option value="stundenzettel">Cả tháng</option>
+              {weeks.map((w) => {
+                const printed = (schedule.printedWeeks ?? []).includes(w.weekStart);
+                return (
                   <option key={`sz-${w.weekStart}`} value={`sz-${w.weekStart}`}>
-                    Bảng chấm công (Stundenzettel) — tuần {w.label}
+                    Tuần {w.label}
+                    {printed ? " ✓ (đã in)" : ""}
                   </option>
-                ))}
-                <option value="month">Lịch làm việc — cả tháng</option>
-                {weeks.map((w) => {
-                  const printed = (schedule.printedWeeks ?? []).includes(w.weekStart);
-                  return (
-                    <option key={w.weekStart} value={w.weekStart}>
-                      Lịch làm việc — tuần {w.label}
-                      {printed ? " ✓ (đã in)" : ""}
-                    </option>
-                  );
-                })}
-              </select>
-            </label>
+                );
+              })}
+            </select>
+          </label>
 
-            {/* Hành động */}
-            <div className="flex items-center gap-2">
-              <button
-                disabled={pdfBusy || !hasSchedule}
-                onClick={onPdf}
-                className="rounded bg-slate-900 px-4 py-2 text-sm font-medium text-white hover:bg-slate-700 active:bg-slate-800 disabled:opacity-40"
-              >
-                ⬇ Xuất PDF
-              </button>
-              {pdfBusy && <span className="text-sm text-slate-500">Đang tạo PDF…</span>}
-            </div>
+          {/* Hành động */}
+          <div className="flex items-center gap-2">
+            <button
+              disabled={pdfBusy || !hasSchedule}
+              onClick={onPdf}
+              className="rounded bg-slate-900 px-4 py-2 text-sm font-medium text-white hover:bg-slate-700 active:bg-slate-800 disabled:opacity-40"
+            >
+              ⬇ Xuất PDF
+            </button>
+            {pdfBusy && (
+              <span className="text-sm text-slate-500">
+                Đang tạo PDF…
+                {pdfProgress && pdfProgress.total > 1 ? ` ${pdfProgress.done}/${pdfProgress.total}` : ""}
+              </span>
+            )}
           </div>
-
-          {!hasSchedule && (
-            <p className="mt-2 text-sm text-slate-400">
-              Chưa có lịch. Sang tab „Lịch làm việc" để tạo.
-            </p>
-          )}
-
-          <p className="mt-2 text-xs text-slate-500">
-            <b>Bảng chấm công (Stundenzettel)</b> theo mẫu tiếng Đức để nộp — một tờ mỗi người, chọn
-            cả tháng hoặc từng tuần. <b>Lịch làm việc</b> là lịch treo ở quán (cả tháng hoặc từng
-            tuần, cho cả quán hoặc một người). Bấm <b>Xuất PDF</b> để tải file về máy (trên điện
-            thoại mở bảng Chia sẻ) — <b>muốn in thì mở file PDF đó rồi in</b>, tờ in ra sạch, đủ mọi
-            trang, có kẻ bảng. <b>Xuất PDF lịch một tuần sẽ khóa lịch tháng</b> để bản treo luôn
-            khớp với hệ thống.
-          </p>
-
-          {isLocked && (
-            <div className="mt-3 rounded bg-amber-50 border border-amber-200 text-amber-900 text-sm px-3 py-2">
-              <div className="font-medium">
-                Lịch tháng này đã khóa vì đã in
-                {schedule.lockedAt &&
-                  ` lúc ${new Date(schedule.lockedAt).toLocaleString("vi-VN")}`}
-                .
-              </div>
-              <div className="mt-0.5">
-                Không sửa được ca, không đổi nhân viên. Vẫn in được bình thường. (Tạo lại lịch ở tab
-                „Lịch làm việc" cũng sẽ mở khóa.)
-              </div>
-
-              {/*
-                Bewusst KEIN window.confirm: In-App-Browser (Messenger,
-                Facebook) unterdrücken die native Rückfrage teilweise. Sie
-                liefert dann stillschweigend false, der Klick tut nichts, und
-                niemand erfährt warum. Die Rückfrage steht deshalb direkt hier.
-              */}
-              {!confirmUnlock ? (
-                <button
-                  onClick={() => setConfirmUnlock(true)}
-                  className="mt-2 rounded border border-amber-400 bg-white px-3 py-1 text-sm font-medium text-amber-900 hover:bg-amber-100"
-                >
-                  Mở khóa
-                </button>
-              ) : (
-                <div className="mt-2 rounded border border-amber-300 bg-white px-3 py-2">
-                  <div className="text-amber-900">
-                    Mở khóa lịch tháng này? Bản đã in ở quán sẽ không còn khớp với hệ thống. Sau
-                    khi sửa, hãy in lại tuần đó và thay bản cũ.
-                  </div>
-                  <div className="mt-2 flex gap-2">
-                    <button
-                      onClick={() => {
-                        unlockMonth();
-                        setConfirmUnlock(false);
-                      }}
-                      className="rounded bg-amber-600 px-3 py-1 text-sm font-medium text-white hover:bg-amber-700"
-                    >
-                      Xác nhận mở khóa
-                    </button>
-                    <button
-                      onClick={() => setConfirmUnlock(false)}
-                      className="rounded border border-slate-300 bg-white px-3 py-1 text-sm text-slate-600 hover:bg-slate-50"
-                    >
-                      Huỷ
-                    </button>
-                  </div>
-                </div>
-              )}
-            </div>
-          )}
         </div>
 
-        {/* Xem trước trên màn hình cho nhân viên đã chọn */}
-        {previewEmployee && (
-          <>
-            <div className="mb-1 text-xs text-slate-500">
-              Xem trước bảng chấm công: <b>{previewEmployee.name}</b>
-              {who === "all" && " (chọn một người ở ô „Cho ai“ để xem người khác)"}
+        {!hasSchedule && (
+          <p className="mt-2 text-sm text-slate-400">
+            Chưa có lịch. Sang tab „Lịch làm việc" để tạo.
+          </p>
+        )}
+
+        <p className="mt-2 text-xs text-slate-500">
+          <b>Bảng chấm công (Stundenzettel)</b> theo mẫu tiếng Đức để nộp — một tờ mỗi người, chọn cả
+          tháng hoặc từng tuần. Bấm <b>Xuất PDF</b> để tải file về máy (trên điện thoại mở bảng Chia
+          sẻ) — <b>muốn in thì mở file PDF đó rồi in</b>: kẻ bảng sắc nét, đủ mọi trang, không dính
+          URL/ngày in. <b>Xuất bảng chấm công một tuần sẽ khóa lịch tháng</b> để bản treo luôn khớp
+          với hệ thống.
+        </p>
+
+        {isLocked && (
+          <div className="mt-3 rounded bg-amber-50 border border-amber-200 text-amber-900 text-sm px-3 py-2">
+            <div className="font-medium">
+              Lịch tháng này đã khóa vì đã in
+              {schedule.lockedAt &&
+                ` lúc ${new Date(schedule.lockedAt).toLocaleString("vi-VN")}`}
+              .
             </div>
-            <div className="rounded-lg border border-slate-300 shadow-sm bg-white overflow-x-auto">
-              <StundenzettelPage schedule={schedule} employee={previewEmployee} />
+            <div className="mt-0.5">
+              Không sửa được ca, không đổi nhân viên. Vẫn in được bình thường. (Tạo lại lịch ở tab
+              „Lịch làm việc" cũng sẽ mở khóa.)
             </div>
-          </>
+
+            {/*
+              Bewusst KEIN window.confirm: In-App-Browser (Messenger, Facebook)
+              unterdrücken die native Rückfrage teilweise. Sie liefert dann
+              stillschweigend false, der Klick tut nichts, und niemand erfährt
+              warum. Die Rückfrage steht deshalb direkt hier.
+            */}
+            {!confirmUnlock ? (
+              <button
+                onClick={() => setConfirmUnlock(true)}
+                className="mt-2 rounded border border-amber-400 bg-white px-3 py-1 text-sm font-medium text-amber-900 hover:bg-amber-100"
+              >
+                Mở khóa
+              </button>
+            ) : (
+              <div className="mt-2 rounded border border-amber-300 bg-white px-3 py-2">
+                <div className="text-amber-900">
+                  Mở khóa lịch tháng này? Bản đã in ở quán sẽ không còn khớp với hệ thống. Sau khi
+                  sửa, hãy in lại tuần đó và thay bản cũ.
+                </div>
+                <div className="mt-2 flex gap-2">
+                  <button
+                    onClick={() => {
+                      unlockMonth();
+                      setConfirmUnlock(false);
+                    }}
+                    className="rounded bg-amber-600 px-3 py-1 text-sm font-medium text-white hover:bg-amber-700"
+                  >
+                    Xác nhận mở khóa
+                  </button>
+                  <button
+                    onClick={() => setConfirmUnlock(false)}
+                    className="rounded border border-slate-300 bg-white px-3 py-1 text-sm text-slate-600 hover:bg-slate-50"
+                  >
+                    Huỷ
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
         )}
       </div>
 
-      {/* Sân khấu ngoài màn hình – dùng CHUNG cho In và Xuất PDF (html2canvas cần
-          render thật, không display:none). */}
-      <div ref={pdfStage} aria-hidden="true" className="pdf-stage no-print">
-        {pdfSchedule ? (
-          <SchedulePrintPage
-            schedule={schedule}
-            dates={pdfSchedule.dates}
-            title={pdfSchedule.title}
-            layout={pdfSchedule.layout}
-            employeeIds={pdfSchedule.employeeIds}
-          />
-        ) : (
-          (pdfList ?? []).map((emp) => (
-            <StundenzettelPage
-              key={emp.id}
-              schedule={schedule}
-              employee={emp}
-              dates={szDates}
-              periodLabel={szLabel}
-            />
-          ))
-        )}
-      </div>
-    </>
+      {/* Xem trước trên màn hình cho nhân viên đã chọn */}
+      {previewEmployee && (
+        <>
+          <div className="mb-1 text-xs text-slate-500">
+            Xem trước bảng chấm công: <b>{previewEmployee.name}</b>
+            {who === "all" && " (chọn một người ở ô „Cho ai“ để xem người khác)"}
+          </div>
+          <div className="rounded-lg border border-slate-300 shadow-sm bg-white overflow-x-auto">
+            <StundenzettelPage schedule={schedule} employee={previewEmployee} />
+          </div>
+        </>
+      )}
+    </div>
   );
 }

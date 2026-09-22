@@ -1,25 +1,10 @@
-import type { Employee, Schedule, Shift } from "../types";
-import {
-  datesOfMonth,
-  parseIsoDate,
-  WEEKDAY_LABELS_DE,
-  weekdayKeyOf,
-} from "../lib/demand";
-import { minutesToDecimalHours, minutesToTime } from "../lib/time";
-import { MONTH_NAMES_DE } from "../lib/dateFormat";
-import { publicHolidayNames } from "../lib/holidays";
-import { format } from "date-fns";
-import { zuschlagTotals, timesheetParts } from "../lib/zuschlaege";
-import { employmentLabelDe } from "../lib/employment";
-
-// Deutscher Monats-Titel für das offizielle Dokument.
-function monthLabelDe(year: number, month: number): string {
-  return `${MONTH_NAMES_DE[month - 1]} ${year}`;
-}
+import type { Employee, Schedule } from "../types";
+import { buildTimesheet } from "../lib/stundenzettel";
 
 /**
- * Ein A4-freundlicher Stundenzettel für einen Mitarbeiter.
- * Wird sowohl für die Bildschirm-Vorschau als auch für den Druck verwendet.
+ * Ein A4-freundlicher Stundenzettel für einen Mitarbeiter (Bildschirm-Vorschau).
+ * Die Daten kommen aus buildTimesheet – DERSELBEN Quelle wie die PDF, damit
+ * Vorschau und Download Zeichen für Zeichen übereinstimmen.
  */
 export function StundenzettelPage({
   schedule,
@@ -34,48 +19,26 @@ export function StundenzettelPage({
   /** Zeitraum-Text oben rechts; fehlend => Monat/Jahr. */
   periodLabel?: string;
 }) {
-  const rows = dates ?? datesOfMonth(schedule.year, schedule.month);
-  const byDate = new Map<string, Shift[]>();
-  for (const s of schedule.shifts) {
-    if (s.employeeId === employee.id) byDate.set(s.date, [...(byDate.get(s.date) ?? []), s]);
-  }
-
-  const shownShifts = rows.flatMap((d) => byDate.get(d) ?? []);
-  const extraLines = rows.reduce((total, date) =>
-    total + Math.max(0, (byDate.get(date) ?? []).flatMap(timesheetParts).length - 1), 0);
-  const totalMinutes = shownShifts.reduce((sum, s) => sum + s.paidMinutes, 0);
-  const surcharges = zuschlagTotals(shownShifts);
-  const holidayNames = publicHolidayNames(schedule.year);
-  const closedByDate = new Map(
-    schedule.dateOverrides.filter((o) => o.closed).map((o) => [o.date, o] as const),
-  );
+  const sheet = buildTimesheet(schedule, employee, dates, periodLabel);
+  const extraLines = sheet.lineCount - sheet.rows.length;
 
   return (
     <div className={`stundenzettel-page miss-do-timesheet ${extraLines > 9 ? "miss-do-timesheet-dense" : ""} bg-white text-slate-900 mx-auto max-w-[210mm] p-6 text-[12px]`}>
       <div className="flex items-start justify-between border-b-2 border-slate-800 pb-2 mb-3">
         <div>
           <h2 className="text-xl font-bold tracking-tight">Stundenaufzeichnung</h2>
-          <p className="text-slate-600">{schedule.companyName || "—"}</p>
-          {schedule.address && <p className="text-slate-500 text-[11px]">{schedule.address}</p>}
+          <p className="text-slate-600">{sheet.companyName}</p>
+          {sheet.address && <p className="text-slate-500 text-[11px]">{sheet.address}</p>}
         </div>
         <div className="text-right text-slate-600">
-          <div>{periodLabel ?? monthLabelDe(schedule.year, schedule.month)}</div>
+          <div>{sheet.periodLabel}</div>
         </div>
       </div>
 
       <div className="grid grid-cols-2 gap-x-8 gap-y-1 mb-3">
-        <Info label="Firmenname" value={schedule.companyName || "—"} />
-        <Info label="Beschäftigungsart" value={employmentLabelDe(employee.employmentType)} />
-        <Info label="Mitarbeiter" value={employee.name} />
-        <Info label="Personalnummer" value={employee.persNr || "—"} />
-        <Info label="Monat" value={MONTH_NAMES_DE[schedule.month - 1]} />
-        {/*
-          Sollstunden bleibt auf dem Zettel bewusst LEER: der Betrieb trägt den
-          Wert von Hand ein (Ausdruck wie PDF). Die geplante Zahl steht in der
-          App (Tab Nhân viên) und gehört nicht auf das Dokument.
-        */}
-        <Info label="Sollstunden" blank />
-        <Info label="Jahr" value={String(schedule.year)} />
+        {sheet.info.map((f) => (
+          <Info key={f.label} label={f.label} value={f.value} blank={f.blank} />
+        ))}
       </div>
 
       <table className="w-full border-collapse text-[11px]">
@@ -91,44 +54,26 @@ export function StundenzettelPage({
           </tr>
         </thead>
         <tbody>
-          {rows.map((d) => {
-            const shifts = byDate.get(d) ?? [];
-            const parts = shifts.sort((a, b) => a.startMinutes - b.startMinutes).flatMap(timesheetParts);
-            const wd = WEEKDAY_LABELS_DE[weekdayKeyOf(parseIsoDate(d))];
-            const holiday = holidayNames.get(d);
-            const closed = closedByDate.get(d);
-            const isWeekend = wd === "Samstag" || wd === "Sonntag";
-            let bemerkung: string;
-            if (parts.length > 0) {
-              bemerkung = holiday ? `Feiertag: ${holiday}` : "";
-            } else if (closed) {
-              bemerkung = closed.note || "Betriebsruhe";
-            } else if (holiday) {
-              bemerkung = `Frei (Feiertag: ${holiday})`;
-            } else {
-              bemerkung = "Frei";
-            }
-            return (
-              <tr key={d} className={isWeekend || holiday || closed ? "bg-slate-50" : ""}>
-                <Td>{format(parseIsoDate(d), "dd.MM.yyyy")}</Td>
-                <Td>{wd}</Td>
-                <Td className="text-center">{parts.map((p, i) => <div key={i}>{minutesToTime(p.startMinutes)}</div>)}</Td>
-                <Td className="text-center">{parts.map((p, i) => <div key={i}>{minutesToTime(p.endMinutes)}</div>)}</Td>
-                <Td className="text-center">{parts.map((p, i) => <div key={i}>{p.pauseMinutes} Min</div>)}</Td>
-                <Td className="text-center">{parts.length ? parts.map((p, i) => <div key={i}>{minutesToDecimalHours(p.paidMinutes)}</div>) : "0,00"}</Td>
-                <Td className="text-left text-slate-500">{parts.length
-                  ? parts.map((p, i) => <div key={i}>{[p.label, bemerkung].filter(Boolean).join(" · ") || "\u00a0"}</div>)
-                  : bemerkung}</Td>
-              </tr>
-            );
-          })}
+          {sheet.rows.map((r) => (
+            <tr key={r.date} className={r.shaded ? "bg-slate-50" : ""}>
+              <Td>{r.date}</Td>
+              <Td>{r.weekday}</Td>
+              <Td className="text-center">{r.lines.map((l, i) => <div key={i}>{l.start}</div>)}</Td>
+              <Td className="text-center">{r.lines.map((l, i) => <div key={i}>{l.end}</div>)}</Td>
+              <Td className="text-center">{r.lines.map((l, i) => <div key={i}>{l.pause}</div>)}</Td>
+              <Td className="text-center">{r.lines.length ? r.lines.map((l, i) => <div key={i}>{l.paid}</div>) : "0,00"}</Td>
+              <Td className="text-left text-slate-500">{r.lines.length
+                ? r.lines.map((l, i) => <div key={i}>{l.bemerkung || " "}</div>)
+                : r.rest}</Td>
+            </tr>
+          ))}
         </tbody>
         <tfoot>
           <tr className="font-semibold bg-slate-100">
             <Td className="text-left" colSpan={5}>
               Gesamtstunden
             </Td>
-            <Td className="text-center">{minutesToDecimalHours(totalMinutes)}</Td>
+            <Td className="text-center">{sheet.totalText}</Td>
             <Td />
           </tr>
         </tfoot>
@@ -141,7 +86,7 @@ export function StundenzettelPage({
       <div className="mt-3 grid grid-cols-3 gap-4 text-[12px]">
         <div>
           <div className="text-slate-500">Gesamtstunden</div>
-          <div className="font-semibold">{minutesToDecimalHours(totalMinutes)} h</div>
+          <div className="font-semibold">{sheet.totalText} h</div>
         </div>
         <div>
           <div className="text-slate-500">Sollstunden</div>
@@ -157,10 +102,10 @@ export function StundenzettelPage({
         <div className="font-semibold mb-1">Zuschläge (nur Stundensumme)</div>
         <div className="grid grid-cols-2 gap-3">
           <div>Nachtzuschlag (Mo–Sa, ab 20:00)<br />
-            <span className="font-semibold">{minutesToDecimalHours(surcharges.after20Minutes)} h</span>
+            <span className="font-semibold">{sheet.nightHoursText} h</span>
           </div>
           <div>Sonntagszuschlag (Sonntag)<br />
-            <span className="font-semibold">{minutesToDecimalHours(surcharges.sundayMinutes)} h</span>
+            <span className="font-semibold">{sheet.sundayHoursText} h</span>
           </div>
         </div>
       </div>

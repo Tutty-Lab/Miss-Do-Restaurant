@@ -41,23 +41,11 @@ body {
   display: none;
 }
 
-/* Bühne für den PDF-Export: muss wirklich gerendert sein (display:none kann
-   html2canvas nicht aufnehmen), liegt deshalb nur außerhalb des Sichtfelds. */
-.pdf-stage {
-  position: absolute;
-  top: 0;
-  left: -10000px;
-  width: 210mm;
-  background: #fff;
-  pointer-events: none;
-}
-
-/* Tabellengitter, das AUCH im PDF ankommt. html2canvas (PDF-Export) zeichnet
-   bei border-collapse:collapse die Linien ZWISCHEN den Zellen nicht – die PDF
-   kam ganz ohne Gitter heraus (gemessen: 0 senkrechte, 0 waagerechte Linien).
-   Mit border-collapse:separate und je Zelle einer rechten + unteren Linie (plus
-   Außenkante oben/links) rendert html2canvas das volle Gitter (7 Spalten- und
-   ~32 Zeilenlinien). Gilt für Bildschirm, Druck und PDF gleichermaßen. */
+/* Tabellengitter der Bildschirm-Vorschau. Die PDF wird separat als Vektor
+   gezeichnet (siehe src/lib/pdf.ts) und braucht dieses CSS nicht mehr; hier geht
+   es nur noch um ein sauberes Gitter in der Vorschau und beim Browser-Druck.
+   border-collapse:separate mit je Zelle rechter + unterer Linie (plus Außenkante
+   oben/links) zeichnet das volle 7-Spalten-Gitter zuverlässig. */
 .miss-do-timesheet table {
   border-collapse: separate !important;
   border-spacing: 0 !important;
