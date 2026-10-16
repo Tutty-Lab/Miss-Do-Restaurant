@@ -14,7 +14,8 @@ export default defineConfig({
     // Den von der Vorschau-Umgebung zugewiesenen Port (PORT) übernehmen, damit
     // parallel laufende Projekte (z. B. auf 5173) nicht kollidieren; sonst
     // Vite-Standard. strictPort:false lässt Vite bei Belegung hochzählen.
-    port: Number(process.env.PORT) || 5173,
+    // Ohne @types/node: process über globalThis lesen (tsc -b prüft diese Datei).
+    port: Number((globalThis as { process?: { env: Record<string, string | undefined> } }).process?.env.PORT) || 5173,
     strictPort: false,
   },
   plugins: [
